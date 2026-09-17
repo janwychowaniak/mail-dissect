@@ -61,20 +61,20 @@ line saying where it came from.
 | 19 | artifact after a restart → `ARTIFACT_NOT_FOUND` (404) | §13.4 | `test_artifacts::test_artifact_from_a_previous_process_life_is_404` |
 | 20 | the same input through both channels → identical results | §4 | `test_intake::test_both_channels_give_identical_results` |
 | 21 | `mailto:` anchor and `cid:` resource → both present, `host: null`, `cid_part` set | §9.1 | `test_html::test_mailto_anchor_and_cid_resource` |
-| 22 | remote image and an anchor with the same address → both lists, one observable | §11 | `test_html::test_same_address_as_anchor_and_as_resource` (observable half: stage 4) |
+| 22 | remote image and an anchor with the same address → both lists, one observable | §11 | `test_observables::test_an_address_in_both_lists_is_one_observable` + `test_html::…same_address…` |
 | 23 | URL with `userinfo` → `host` and `userinfo` split correctly | §9.1 | `test_html::test_url_with_userinfo` |
-| 24 | the same address five times → one entry, `occurrences: 5`, complete `sources[]` | §11.3 | stage 4 |
-| 25 | defanged address → `value` re-armed, `value_raw` original, `defanged: true` | §11.3 | stage 4 |
-| 26 | `raport.zip` → two candidates; `faktura.pdf` → only `filename` | §11.3 | stage 4 |
-| 27 | IDN host in uppercase → punycode and lowercase in `value`, path untouched | §11.3 | stage 4 |
-| 28 | private address `10.0.0.5` → present, not filtered | §11.3 | stage 4 |
+| 24 | the same address five times → one entry, `occurrences: 5`, complete `sources[]` | §11.3 | `test_observables::test_the_same_address_five_times` |
+| 25 | defanged address → `value` re-armed, `value_raw` original, `defanged: true` | §11.3 | `test_observables::test_defanged_address_is_re_armed_and_marked` |
+| 26 | `raport.zip` → two candidates; `faktura.pdf` → only `filename` | §11.3 | `test_observables::test_ambiguous_filename_and_domain` |
+| 27 | IDN host in uppercase → punycode and lowercase in `value`, path untouched | §11.3 | `test_observables::test_canonical_value_next_to_the_original` |
+| 28 | private address `10.0.0.5` → present, not filtered | §11.3 | `test_observables::test_private_addresses_are_not_filtered` |
 | 29 | a binary file sent as a message → `UNPARSABLE` (422) | §15, §16 | `test_intake::test_binary_file_is_unparsable` |
 | 30 | one valid header, then garbage **instead of further headers** → 200 with `malformed_mime`; a binary body alone is not damage `[D23]` | §15 | `test_intake::test_one_header_and_garbage_is_accepted` (+ `…binary_body_is_not_damage`) |
 | 31 | artifact write impossible → success, `artifact_id: null`, `artifact_store_failed` | §13.4, §8 | `test_artifacts::test_failed_artifact_write_still_dissects` |
-| 32 | `README.md`/`raport.zip` ambiguous; `faktura.pdf`/`example.com` not | §11.3 | stage 4 |
-| 33 | `wersja.1.2` → no `domain` candidate | §11.2 | `test_registries::test_public_suffix` (registry half; observable half stage 4) |
-| 34 | `bit.ly/xyz` and `www.example.com` → `url` plus their hosts as `domain` | §11.2 | stage 4 |
-| 35 | email address in content → `email` plus its domain as `domain` | §11.2 | stage 4 |
+| 32 | `README.md`/`raport.zip` ambiguous; `faktura.pdf`/`example.com` not | §11.3 | `test_observables::test_ambiguous_filename_and_domain` |
+| 33 | `wersja.1.2` → no `domain` candidate | §11.2 | `test_observables::test_a_version_number_is_not_a_domain` |
+| 34 | `bit.ly/xyz` and `www.example.com` → `url` plus their hosts as `domain` | §11.2 | `test_observables::test_url_yields_its_host_as_well` |
+| 35 | email address in content → `email` plus its domain as `domain` | §11.2 | `test_observables::test_email_yields_its_domain_as_well` |
 | 36 | `/v1/health` → 200 with dependencies off, all fields, registry versions | §14.3, §12 | `test_health::test_health_reports_registry_versions_with_tools_disabled` |
 | 37 | `multipart/mixed` with two `text/plain` → first is the body | §6.3 | `test_mime::test_mixed_with_two_text_parts` |
 | 38 | `multipart/related` with `alternative` inside and a `cid:` image | §6.3, §9.1 | `test_html::test_related_with_alternative_inside` |
@@ -95,7 +95,7 @@ line saying where it came from.
 | 53 | working renderer → `screenshot` artifact with `message_index` | §14.2 | stage 5 |
 | 54 | whole-dissection budget exceeded → 200, `ok: true`, `truncated` | §15 | stage 5 |
 | 55 | unknown `artifact_id` with a valid `dissect_id` → 404 | §16 | `test_artifacts::test_unknown_artifact_id_with_a_valid_dissect_id` |
-| 56 | candidates from headers carry `header_name` and `header_index` | §11.1 | stage 4 |
+| 56 | candidates from headers carry `header_name` and `header_index` | §11.1 | `test_observables::test_candidates_from_headers_name_their_place` |
 | 57 | artifact response headers: octet-stream, sanitised filename, nosniff | §13.3 | `test_mime::test_attachment_filename_is_sanitised_in_the_response_header` |
 | 58 | mixed tool outcome → worst wins (`timeout`), per-item links still correct | §14 | stage 5 |
 | 59 | nested message screenshot → two `screenshot` artifacts | §13.1, §14.2 | stage 5 |
@@ -105,7 +105,7 @@ line saying where it came from.
 | 63 | nested original byte-for-byte, hash matching an independent computation | §13.2 | `test_mime::test_nested_original_is_byte_identical` |
 | 64 | transport-encoded nesting → a parsed message, `eml` after decoding | §6.2 | `test_mime::test_transport_encoded_nesting_is_still_a_message` |
 | 65 | part count far over the limit → `truncated` in scan time, no full tree | §15 | `test_mime::test_part_count_far_over_the_limit_is_cut_in_scan_time` |
-| 66 | `payload.scr` in body text → no candidate with an empty supplement, a `filename` candidate with `EXTRA_FILE_EXTENSIONS=scr` | §12, §11.2 | registry half: `test_registries::test_the_supplement_is_additive_and_changes_the_version`; observable half: stage 4 |
+| 66 | `payload.scr` in body text → no candidate with an empty supplement, a `filename` candidate with `EXTRA_FILE_EXTENSIONS=scr` | §12, §11.2 | `test_observables::test_the_extension_supplement_changes_recognition` + `test_registries::…supplement…` |
 
 ## Resilience
 

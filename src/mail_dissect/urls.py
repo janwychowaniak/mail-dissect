@@ -80,6 +80,10 @@ def canonical_host(host: str) -> tuple[str, str | None]:
     """
     lowered = host.lower().rstrip(".")
     if lowered.isascii():
+        # Only a punycode label has a different unicode form, and `idna.decode` is expensive
+        # enough that calling it on every ordinary host dominates a scan of a large body.
+        if "xn--" not in lowered:
+            return lowered, None
         try:
             unicode_form = idna.decode(lowered)
         except (idna.IDNAError, UnicodeError, ValueError):

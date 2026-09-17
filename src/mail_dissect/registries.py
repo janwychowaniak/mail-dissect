@@ -18,6 +18,8 @@ from pathlib import Path
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
 
+MAX_HOST_LENGTH = 253  # RFC 1035 §2.3.4
+
 _ICANN_BEGIN = "// ===BEGIN ICANN DOMAINS==="
 _ICANN_END = "// ===END ICANN DOMAINS==="
 
@@ -128,7 +130,10 @@ class Registries:
         already known to be one; here it would make every dotted token a domain and
         `wersja.1.2` a candidate, which SPEC §11.2 forbids.
         """
-        if not host or host.startswith(".") or ".." in host:
+        # A name longer than this is not a host, and treating it as one is not merely
+        # wrong but expensive: the search below walks every suffix position, so an
+        # unbounded "host" of half a million labels costs quadratic time (RFC 1035 §2.3.4).
+        if not host or host.startswith(".") or ".." in host or len(host) > MAX_HOST_LENGTH:
             return None
         labels = host.lower().rstrip(".").split(".")
         count = len(labels)

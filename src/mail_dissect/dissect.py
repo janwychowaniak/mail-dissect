@@ -11,7 +11,7 @@ import dataclasses
 
 from .artifacts import ArtifactStore
 from .decode import hash_bytes
-from .htmlscan import AnchorEvent, HtmlScan, ResourceEvent, scan_html
+from .htmlscan import AnchorEvent, HtmlScan, ResourceEvent, TextEvent, scan_html
 from .message import ParsedMessage, dissect_messages
 from .mimetree import PartInfo
 from .models import (
@@ -25,11 +25,15 @@ from .models import (
     LinkOut,
     MessageOut,
     MimePartOut,
+    ObservableOut,
+    ObservableSourceOut,
     ReceivedOut,
     ResourceOut,
     SourceHashes,
     scrub_surrogates,
 )
+from .observables import Collector, Source
+from .registries import Registries
 from .settings import Settings
 from .unwrap import Unwrapper
 from .urls import UrlParts, split
@@ -51,6 +55,7 @@ class _Assembly:
         self._dissect_id = dissect_id
         self._settings = settings
         self.unwrapper = Unwrapper(settings.unwrappers)
+        self.registries: Registries | None = None
         self.artifacts: list[ArtifactOut] = []
         self.flags: set[str] = set()
         self.scrubbed = False
@@ -90,7 +95,11 @@ class _Assembly:
 
 
 def build_response(
-    raw: bytes, dissect_id: str, store: ArtifactStore, settings: Settings
+    raw: bytes,
+    dissect_id: str,
+    store: ArtifactStore,
+    settings: Settings,
+    registries: Registries,
 ) -> DissectResponse:
     """Dissect the input and assemble the answer."""
     dissection = dissect_messages(
@@ -100,6 +109,7 @@ def build_response(
         max_depth=settings.max_nesting_depth,
     )
     assembly = _Assembly(store, dissect_id, settings)
+    assembly.registries = registries
     assembly.flags |= dissection.flags
 
     messages = [_build_message(parsed, assembly, settings) for parsed in dissection.messages]
@@ -129,6 +139,7 @@ def _build_message(parsed: ParsedMessage, assembly: _Assembly, settings: Setting
     cid_map = _cid_map(parsed)
     body = _build_body(parsed, assembly, settings, scan)
     links, resources = _build_addresses(scan, assembly, cid_map)
+    observables = _build_observables(parsed, assembly, scan, cid_map)
     return MessageOut(
         index=index,
         depth=parsed.depth,
@@ -168,11 +179,68 @@ def _build_message(parsed: ParsedMessage, assembly: _Assembly, settings: Setting
         mime_parts=[_build_part(info, assembly) for info in parsed.tree.parts],
         links=links,
         resources=resources,
+        observables=observables,
         attachments=[
             _build_attachment(parsed.tree.parts[part_index], assembly, index)
             for part_index in parsed.tree.attachments
         ],
     )
+
+
+def _build_observables(
+    parsed: ParsedMessage, assembly: _Assembly, scan: HtmlScan | None, cid_map: dict[str, int]
+) -> list[ObservableOut]:
+    """Scan this message in the order of `[D9]`: headers, then text, then HTML.
+
+    The collector is append-only, so candidates that a later stage adds from document text
+    can only extend the tail - the deterministic core of the list does not move when the
+    text extractor is absent or fails (test 62).
+    """
+    assert assembly.registries is not None
+    collector = Collector(assembly.registries)
+
+    for name, values in parsed.headers.items():
+        for index, value in enumerate(values):
+            collector.feed_text(value, Source(kind="header", header_name=name, header_index=index))
+
+    text_index = parsed.tree.body_text_index
+    if text_index is not None:
+        info = parsed.tree.parts[text_index]
+        if info.text:
+            collector.feed_text(info.text.text, Source(kind="body_text", part_index=text_index))
+
+    html_index = parsed.tree.body_html_index
+    if scan is not None and html_index is not None:
+        source = Source(kind="body_html", part_index=html_index)
+        for event in scan.events:
+            if isinstance(event, TextEvent):
+                collector.feed_text(event.text, source)
+            elif isinstance(event, AnchorEvent | ResourceEvent):
+                # The address as the consumer will see it in links[]/resources[]: unwrapped,
+                # so the two lists and this one describe the same thing (SPEC §11).
+                collector.feed_url(assembly.unwrapper.apply(event.href).href, source)
+
+    return [
+        ObservableOut(
+            value=assembly.text(candidate.value),
+            value_raw=assembly.text(candidate.value_raw),
+            type=candidate.type,
+            subtype=candidate.subtype,
+            defanged=candidate.defanged,
+            ambiguous=candidate.ambiguous,
+            occurrences=candidate.occurrences,
+            sources=[
+                ObservableSourceOut(
+                    kind=source.kind,
+                    header_name=source.header_name,
+                    header_index=source.header_index,
+                    part_index=source.part_index,
+                )
+                for source in candidate.sources
+            ],
+        )
+        for candidate in collector.finish()
+    ]
 
 
 def _build_part(info: PartInfo, assembly: _Assembly) -> MimePartOut:

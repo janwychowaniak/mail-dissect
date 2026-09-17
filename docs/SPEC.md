@@ -451,9 +451,16 @@ alternatives is part of the contract**, because it is what resolves overlaps: le
 wins, and at the same position the earlier alternative wins.
 
 ```
-1 url with scheme   2 defanged form   3 email   4 schemeless url
-5 ipv6              6 ipv4            7 hash    8 registry-gated token (domain / filename)
+1 defanged form     2 url with scheme   3 email   4 schemeless url
+5 ipv6              6 ipv4              7 hash    8 registry-gated token (domain / filename)
 ```
+
+**The defanged form is matched first, and that ordering is load-bearing.** `hxxp:` is a
+syntactically valid scheme, so a URL alternative placed ahead of it swallows
+`hxxp://zly[.]host` and returns a broken address instead of a re-armed one. A URI with a
+scheme comes second, and an opaque one is required to carry an `@` or a `/` — the structural
+test that separates `mailto:a@example.com` from the `Note:this` of an ordinary sentence,
+without a list of schemes we happen to approve of.
 
 IPs are matched loosely and validated with a real IP parser. Trailing punctuation is trimmed
 from URLs by a fixed rule: strip trailing `.,;:!?"'`, then strip unbalanced `)]}>`.
@@ -475,8 +482,18 @@ from URLs by a fixed rule: strip trailing `.,;:!?"'`, then strip unbalanced `)]}
   and `README.md` satisfy both grammars, because `zip` and `md` are simultaneously public
   suffixes and file extensions. The service does not guess: it emits both candidates and flags
   them, so a consumer can drop them with one condition if they are not interested. Where the
-  resolution is unambiguous (`faktura.pdf` — `pdf` is not a public suffix; `example.com` —
-  `com` is not an extension), one entry without the flag. **The flag concerns this collision
+  resolution is unambiguous — `faktura.pdf`, because `pdf` is not a public suffix, or
+  `example.org`, because `org` is not an extension — there is one entry without the flag.
+
+  **`example.com` is ambiguous, and so is `example.org`.** Measured against the shipped
+  snapshots, **60 of the 1441 single-label public suffixes are also file extensions** — 4.2%
+  of them, but the 4.2% includes `com` (the extension of `application/x-msdownload`) and
+  `org` (`text/x-org`). Every `.com` and `.org` domain in a message therefore yields a
+  `filename` candidate beside it, both flagged. `net`, `info`, `io`, `dev` and `app` do not
+  collide. This is the rule working rather than failing — two registries genuinely claim the
+  string, and the flag is what lets a consumer drop one side with a single condition — but it
+  is a larger share of ordinary mail than the `raport.zip` example suggests, and a consumer
+  reading `observables[]` without filtering on `ambiguous` will see it immediately. **The flag concerns this collision
   only** and does not mean "careful, this might be a coincidence": a version number that looks
   like an IP address, or an identifier that looks like a hash, are recognised without
   reservation, because grammatically that is what they are.

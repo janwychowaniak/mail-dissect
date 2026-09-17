@@ -62,7 +62,7 @@ async def dissect(request: Request) -> JSONResponse:
             "UNPARSABLE", "input has no header line before the first empty line", dissect_id
         )
 
-    response = build_response(raw, dissect_id, store, settings)
+    response = build_response(raw, dissect_id, store, settings, request.app.state.registries)
     log_event(
         "dissect",
         dissect_id=dissect_id,
