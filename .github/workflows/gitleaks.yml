@@ -1,0 +1,29 @@
+name: gitleaks
+
+# Layer 4/4 and the only NON-bypassable one: runs server-side regardless of any
+# local --no-verify, a tool that ignores core.hooksPath, or a machine without
+# gitleaks installed. Scans content AND commit messages.
+on:
+  push:
+  pull_request:
+  schedule: [{ cron: '17 4 * * 1' }]   # weekly re-audit of the full history against
+                                       # a newer binary and any rules added later
+  workflow_dispatch:
+
+permissions: { contents: read }
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }        # full history for the content scan + git log --all
+      - run: sudo apt-get update && sudo apt-get install -y gitleaks
+      - name: Scan content (full history)
+        run: gitleaks detect --source . --config .gitleaks.toml --redact -v
+      - name: Scan commit messages
+        run: |
+          git log --all --format=%B > "$RUNNER_TEMP/m.txt"
+          # --config is mandatory: a FILE source never auto-loads a config, so
+          # without it this pass silently runs on default rules only.
+          gitleaks detect --no-git --source "$RUNNER_TEMP/m.txt" --config .gitleaks.toml --redact -v

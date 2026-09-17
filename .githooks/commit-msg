@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Layer 2/4: the commit MESSAGE body ($1 = message file). The gap --staged cannot
+# see: an accidental `typeset`/`env`/$(…) capture in the message never touches a
+# file, so pre-commit, git log -S and git grep are all blind to it.
+# --config is REQUIRED here: $1 lives in .git/ and config autodetection resolves
+# only for DIRECTORY sources — without the flag this runs on default rules only
+# and the whole custom ruleset (incl. sk-ant-) never applies.
+command -v gitleaks >/dev/null 2>&1 || { echo "⚠️  gitleaks not installed — skipping" >&2; exit 0; }
+gitleaks detect --no-git --source "$1" --config .gitleaks.toml --redact -v || {
+  echo "❌ gitleaks: secret in the commit MESSAGE — commit blocked" >&2; exit 1; }

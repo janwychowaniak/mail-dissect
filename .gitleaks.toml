@@ -1,0 +1,100 @@
+title = "mail-dissect gitleaks config"
+
+# One config feeds all four layers: .githooks/pre-commit (staged content),
+# .githooks/commit-msg (message body), .githooks/pre-push (pushed range) and
+# .github/workflows/gitleaks.yml (CI, the only non-bypassable one).
+#
+# Built for gitleaks 8.16 (Ubuntu apt): `detect` / `protect` verbs, singular
+# [allowlist]. On 8.19+ the verbs are `git` / `dir`; on 8.25+ allowlists become
+# [[allowlists]]. The rules below are version-independent.
+
+[extend]
+useDefault = true                    # keep the FULL built-in ruleset; rules below only add
+
+[allowlist]
+description = "false positives"
+paths = ['''\.gitleaks\.toml''']     # don't scan our own config (it carries rule regexes)
+# regexes = ['''YOUR_[A-Z_]*_(KEY|TOKEN)''']   # add real FPs (e.g. --help placeholders) as they appear
+
+# --- ADD-ON rules: only ADD coverage, never replace -------------------------------
+# Every id is unique and jw- prefixed, so no built-in is overridden (a colliding id
+# would replace that built-in). These are the safety net: the built-in
+# `generic-api-key` is the only net covering prefix-less secrets and it disables
+# itself on stopwords found in the secret's own VALUE. Measured on this corpus with
+# the built-ins alone: every fake key was caught EXCEPT sk-ant- (the "ant" substring
+# allowlists it). Prefix-anchored rules fire regardless of entropy and stopwords.
+#
+# Deliberately NOT re-added (verified caught by built-ins here): mailgun key-,
+# ghp_ / github_pat_, xoxb-, sk_live_, PEM private keys. Mailgun in particular
+# would need the keyword "key-", which occurs in ordinary text ("key-value") and
+# would suppress generic-api-key on those lines — a net loss.
+
+[[rules]]
+id = "jw-anthropic-key"
+description = "Anthropic API key"
+regex  = '''\bsk-ant-[A-Za-z0-9]{2,12}-[A-Za-z0-9_-]{80,120}\b'''
+keywords = ["sk-ant-"]              # loose middle segment: survives api03 -> admin01 etc.
+
+[[rules]]
+id = "jw-openrouter-key"
+description = "OpenRouter API key (sk-or-v1-)"
+regex  = '''sk-or-v1-[0-9a-f]{64}'''
+keywords = ["sk-or-v1-"]            # perf gate: regex runs only if keyword present
+
+[[rules]]
+id = "jw-openai-key"
+description = "OpenAI API key (project / service account / admin)"
+regex  = '''sk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{20,200}'''
+keywords = ["sk-proj-", "sk-svcacct-", "sk-admin-"]
+
+[[rules]]
+id = "jw-openai-key-legacy"
+description = "OpenAI API key (legacy sk- + 48)"
+regex = '''\bsk-[A-Za-z0-9]{48}\b'''
+# No keywords on purpose: the only usable one would be "sk-", which also occurs in
+# ordinary words ("task-runner") and would suppress generic-api-key on those lines.
+# A keyword-less rule is evaluated everywhere instead — costlier, never quieter.
+
+[[rules]]
+id = "jw-groq-key"
+description = "Groq API key"
+regex  = '''gsk_[0-9A-Za-z]{40,60}'''
+keywords = ["gsk_"]
+
+[[rules]]
+id = "jw-huggingface-token"
+description = "Hugging Face access token"
+regex  = '''hf_[A-Za-z0-9]{30,40}'''
+keywords = ["hf_"]
+
+[[rules]]
+id = "jw-google-api-key"
+description = "Google API key"
+regex  = '''AIza[0-9A-Za-z_-]{35}'''
+keywords = ["AIza"]
+
+[[rules]]
+id = "jw-jina-key"
+description = "Jina API key"
+regex  = '''jina_[0-9A-Za-z_-]{24,80}'''
+keywords = ["jina_"]
+
+[[rules]]
+id = "jw-firecrawl-key"
+description = "Firecrawl API key"
+regex  = '''fc-[0-9a-f]{20,64}'''
+keywords = ["fc-"]
+
+# CONTEXT-anchored, for secrets whose bare shape would be all false positives
+# (40-char base64, 64-hex that collides with SHA-256): anchor on the name instead.
+[[rules]]
+id = "jw-aws-secret-access-key"
+description = "AWS secret access key (context-anchored)"
+regex  = '''(?i)\baws[_-]?secret[_-]?access[_-]?key\b\s*[:=]\s*['"]?[A-Za-z0-9/+=]{40}\b'''
+keywords = ["secret_access_key", "secret-access-key"]
+
+[[rules]]
+id = "jw-virustotal-key"
+description = "VirusTotal API key (context-anchored)"
+regex  = '''(?i)\b(?:virustotal|vt)[_-]?(?:api[_-]?)?key\b\s*[:=]\s*['"]?[0-9a-f]{64}\b'''
+keywords = ["virustotal", "vt_api_key", "vt-api-key", "vtkey"]

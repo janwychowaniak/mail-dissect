@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Layer 1/4: staged FILE CONTENT. Advisory only — --no-verify skips it; CI is the
+# real enforcement. gitleaks 8.16 (apt) verbs: protect/detect. On 8.19+: `gitleaks
+# git --staged`. --config is passed explicitly everywhere: autodetection follows
+# --source, not cwd, and silently falls back to the DEFAULT rules when it misses.
+command -v gitleaks >/dev/null 2>&1 || { echo "⚠️  gitleaks not installed — skipping" >&2; exit 0; }
+gitleaks protect --staged --config .gitleaks.toml --redact -v || {
+  echo "❌ gitleaks: secret in staged changes — commit blocked" >&2; exit 1; }
