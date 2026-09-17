@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
-import time
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -58,7 +57,8 @@ def _message_bytes(body: bytes, content_type: str) -> bytes | None:
 async def dissect(request: Request) -> JSONResponse:
     settings = request.app.state.settings
     store = request.app.state.store
-    started = time.monotonic()
+    clock = request.app.state.clock
+    started = clock()
     # Minted before anything can fail: the envelope carries it on failure too, and without it
     # a consumer cannot correlate the error with the request (SPEC §16).
     dissect_id = new_dissect_id()
@@ -121,7 +121,7 @@ async def dissect(request: Request) -> JSONResponse:
         size=len(raw),
         messages=len(response.messages),
         flags=flags,
-        duration_ms=round((time.monotonic() - started) * 1000, 1),
+        duration_ms=round((clock() - started) * 1000, 1),
     )
     return JSONResponse(content=response.model_dump())
 
@@ -164,7 +164,7 @@ async def health(request: Request) -> HealthOut:
     return HealthOut(
         ok=True,
         version=__version__,
-        uptime_seconds=int(time.monotonic() - app.state.started_at),
+        uptime_seconds=max(0, int(app.state.clock() - app.state.started_at)),
         tools=tools,
         tools_checked_age_seconds=age,
         registries=RegistryVersionsOut(

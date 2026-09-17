@@ -78,6 +78,9 @@ def create_app(
     app.state.settings = resolved
     app.state.registries = registries
     app.state.store = store
+    # The clock is injected so tests can state the passage of time instead of sleeping;
+    # everything that measures duration must read THIS one, or it mixes two time sources.
+    app.state.clock = clock
     app.state.started_at = clock()
     register_error_handlers(app)
     app.include_router(router)

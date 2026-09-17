@@ -22,8 +22,19 @@ def test_health_reports_registry_versions_with_tools_disabled(client: TestClient
     assert body["registries"]["public_suffix_list"].endswith("/bb3d3bb844f1")
     assert "+icann/" in body["registries"]["public_suffix_list"]  # [D21] names the section
     assert body["registries"]["file_extensions"].startswith("mime-db@")
-    assert body["uptime_seconds"] >= 0
+    assert body["uptime_seconds"] == 0
     assert body["version"]
+
+
+def test_uptime_is_measured_on_the_service_clock(client: TestClient, clock: FakeClock) -> None:
+    """Uptime must come from the same clock the service was started on.
+
+    Reading `time.monotonic()` here instead looked right on a developer machine and produced
+    a negative uptime on a fresh CI runner, because the two clocks share no origin.
+    """
+    assert client.get("/v1/health").json()["uptime_seconds"] == 0
+    clock.advance(125)
+    assert client.get("/v1/health").json()["uptime_seconds"] == 125
 
 
 def test_disabled_tools_are_never_probed(client: TestClient) -> None:
