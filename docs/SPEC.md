@@ -516,10 +516,25 @@ multi-label suffixes such as `example.co.uk`) and a **list of known file extensi
    (§17) and must not depend on who built the image.
 3. The registries keep their own licences, also when the project is under a different one.
 
-Matching against the public suffix list (exact rules, `*` wildcards, `!` exceptions, both the
-ICANN and PRIVATE sections) is implemented in this project rather than taken from a package:
-the available packages carry their own snapshot, which would fork the version string that
-`/v1/health` promises.
+Matching against the public suffix list (exact rules, `*` wildcards, `!` exceptions) is
+implemented in this project rather than taken from a package: the available packages carry
+their own snapshot, which would fork the version string that `/v1/health` promises.
+
+**Only the ICANN section of the list is loaded** `[D21]`. The file also carries a PRIVATE
+DOMAINS section — suffixes that companies register for delegation of their own (`github.io`,
+`blogspot.com`, `s3.amazonaws.com`). Loading it would change recognition, because a `domain`
+needs at least one label in front of a public suffix: with the PRIVATE section in, a bare
+`blogspot.com` or `github.io` written in a message yields **no candidate at all**, which is a
+silent loss of exactly the kind of address messages carry. The PRIVATE section is also the
+half that is closest to being somebody's point of view — an opt-in list that changes for
+commercial reasons — while the ICANN section describes actual delegation, which is the
+distinction §2 draws between reference data and policy.
+
+Which section is loaded is an **input to recognition and therefore to determinism** (§17), and
+a version number alone does not reveal it, so the version string exposed in `/v1/health` names
+it: `<snapshot date>+<section>/<first 12 hex characters of the content digest>`, for example
+`2026-09-17+icann/9f2b1c4d7e08`. The same snapshot date, section and digest are recorded in
+`data/registries.json` next to each registry's licence.
 
 ## 13. Artifacts
 
@@ -732,6 +747,12 @@ header: demanding `From` or `Date` would be policy, because messages without the
 it a heuristic over content (proportion of non-printable bytes, file signatures) — such guessing
 would give different results in different implementations.
 
+The boundary is decided **on the raw bytes**, not on what the parser returned: a line beginning
+with `From ` is swallowed by the standard library as a Unix mbox envelope line, so a message
+whose only header-looking line is `From : a@example.com` parses into zero headers with no defect
+at all (F1b). Reading that as "no headers" would be right by accident here and wrong for a
+genuine mbox export, which legitimately opens with an envelope line followed by real headers.
+
 **Damaged MIME is normal input**, not an exception: flag `malformed_mime`, dissect what can be
 dissected. The standard library is nearly silent about damage (F8), so both `malformed_mime`
 and `attachment_unreadable` are defined by this service: the former when the raw header
@@ -897,6 +918,9 @@ Approved by the maintainer, 2026-09-17.
 - **[D15] HTML is parsed with the standard library's `html.parser`** — no C extension reading
   the one input class guaranteed to be hostile, and no tree repair that varies with a library
   version (F10).
+- **[D21] Only the ICANN section of the public suffix list is loaded**, and the section is
+  named in the version string, because which section is in use changes recognition and a
+  version number alone does not reveal it (§12).
 
 **Delivery**
 

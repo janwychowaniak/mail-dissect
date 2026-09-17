@@ -14,8 +14,8 @@ wins; this file records only **what the standard library actually does**.
 
 - Re-serialising a parsed message reproduces the input **only when the input was already
   canonical**. Every malformed shape this service exists to handle is silently normalised,
-  and one of them is silently destroyed. Hence `[D12]`: the `eml` artifact carries original
-  bytes. (F1)
+  and two of them lose headers outright — by two different mechanisms, one of which raises no
+  defect at all. Hence `[D12]`: the `eml` artifact carries original bytes. (F1, F1b)
 - A `message/rfc822` part carrying `Content-Transfer-Encoding: base64` is parsed into a
   bogus `text/plain` child under **both** policies. The tree is wrong and the only signal is
   a defect that also fires for benign reasons. Hence the explicit recursive-decode rule. (F2)
@@ -46,11 +46,33 @@ malformed input:
 | `From:a@example.com` (no space after colon) | space inserted |
 | 8-bit bytes in a header | re-encoded as `=?unknown-8bit?q?...?=` |
 | message with headers but no body | a blank line appended |
-| `From : a@example.com` (space before colon) | **the header is dropped entirely** |
+| `From : a@example.com` as the only header | rebuilt as `\r\nbody` — the line is gone |
+| `X-Broken : yes` between two valid headers | `From: …` + blank line + the rest as body |
 
-The last row is the decisive one: the rebuilt message is `\r\nbody`, i.e. a message with no
-headers at all. A `sha256` taken from that identifies something the sender never sent, and
-nothing in the response would say so.
+The last two rows are both losses, and they are two **different** mechanisms (F1b), so neither
+generalises to "a malformed header disappears". In the first, one line is silently reclassified
+and the rebuilt message has no headers at all; in the second, the header block ends early and
+the `Subject:` that followed is no longer a header in the rebuilt message. Either way a
+`sha256` taken from the reconstruction identifies something the sender never sent, and nothing
+in the response would say so.
+
+## F1b — a space before the colon: two mechanisms, one of them without a defect
+
+`email.feedparser.headerRE` is `^(From |[\041-\071\073-\176]*:|[\t ])`. The middle alternative
+excludes the space character before the colon, so `X-Broken : yes` is not a header line; but the
+**first alternative matches any line starting with `From `**, which is the Unix mbox envelope
+rule.
+
+| Input | Headers parsed | `get_unixfrom()` | Defects | Payload |
+| --- | --- | --- | --- | --- |
+| `From : a@example.com` alone | **none** | `'From : a@example.com'` | **none** | `'body'` |
+| `X-Broken : yes` among valid headers | `From` only | `None` | `MissingHeaderBodySeparatorDefect` | `'X-Broken : yes\r\nSubject: s\r\n\r\nbody'` |
+
+The first row is the dangerous one: a line a human reads as a `From` header produces a message
+with **zero headers and no defect at all** — nothing to notice. It also has a contract
+consequence: the `UNPARSABLE` boundary (SPEC §15) must be decided on the raw bytes, not on
+"the standard library returned no headers", because a genuine mbox export legitimately begins
+with an envelope line followed by real headers.
 
 Also: `get_payload(decode=True)` on a `message/rfc822` part returns `None`, because its
 payload is a list of `Message` objects — there is no stdlib call that hands back the nested

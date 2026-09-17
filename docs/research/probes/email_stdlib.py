@@ -58,7 +58,10 @@ def f1_nested_reserialisation_is_not_byte_identical() -> None:
         "no space after colon": b"From:a@example.com" + CRLF + CRLF + b"body",
         "8-bit header bytes": b"Subject: caf\xe9" + CRLF + CRLF + b"body",
         "no body at all": b"From: a@example.com" + CRLF,
-        "space before colon": b"From : a@example.com" + CRLF + CRLF + b"body",
+        "space before colon, only header": b"From : a@example.com" + CRLF + CRLF + b"body",
+        "space before colon, among valid": CRLF.join(
+            [b"From: a@example.com", b"X-Broken : yes", b"Subject: s", b"", b"body"]
+        ),
     }
     for label, inner in cases.items():
         rebuilt = roundtrip(inner)
@@ -67,6 +70,29 @@ def f1_nested_reserialisation_is_not_byte_identical() -> None:
         if not identical:
             print(f"    input   : {inner!r}")
             print(f"    rebuilt : {rebuilt!r}")
+
+
+def f1b_header_line_traps() -> None:
+    """Why do malformed header lines disappear? Two different mechanisms."""
+    _banner("F1b", "header lines with a space before the colon")
+    from email.feedparser import headerRE
+
+    print(f"feedparser.headerRE = {headerRE.pattern}")
+    for line in ("From : a@example.com", "X-Broken : yes", "From: ok@example.com"):
+        print(f"    {line!r:26s} matches={bool(headerRE.match(line))}")
+    cases = {
+        "only header, starts with 'From '": b"From : a@example.com\r\n\r\nbody",
+        "among valid headers": (
+            b"From: a@example.com\r\nX-Broken : yes\r\nSubject: s\r\n\r\nbody"
+        ),
+    }
+    for label, raw in cases.items():
+        msg = message_from_bytes(raw, policy=email.policy.compat32)
+        print(f"{label}:")
+        print(f"    headers  = {msg.items()}")
+        print(f"    unixfrom = {msg.get_unixfrom()!r}")
+        print(f"    defects  = {[type(d).__name__ for d in msg.defects]}")
+        print(f"    payload  = {msg.get_payload()!r}")
 
 
 def f2_base64_nested_message_is_parsed_as_text() -> None:
@@ -255,6 +281,7 @@ def f10_html_parser_survives_hostile_input() -> None:
 def main() -> int:
     print(f"python {sys.version}")
     f1_nested_reserialisation_is_not_byte_identical()
+    f1b_header_line_traps()
     f2_base64_nested_message_is_parsed_as_text()
     f3_policy_cost()
     f4_filename_extraction()
