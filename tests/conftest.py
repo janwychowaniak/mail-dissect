@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import socket
 from collections.abc import Iterator
 from pathlib import Path
@@ -67,3 +68,24 @@ def dissect(client: TestClient, raw: bytes = SIMPLE) -> dict:
     response = client.post("/v1/dissect", content=raw, headers={"content-type": "message/rfc822"})
     assert response.status_code == 200, response.text
     return response.json()
+
+
+def mask_environment(body: dict) -> dict:
+    """Blank out what SPEC §17 excludes from determinism, keeping order intact.
+
+    Excluded is the *composition* of what depends on the environment — the random
+    identifiers, the tool states and what they produce — never the ORDER of anything.
+    """
+    masked = json.loads(json.dumps(body))
+    masked["dissect_id"] = "<id>"
+    for artifact in masked.get("artifacts", []):
+        artifact["artifact_id"] = "<id>"
+    for message in masked.get("messages", []):
+        for field in ("text_artifact_id", "html_artifact_id", "text_from_html_artifact_id"):
+            if message["body"].get(field):
+                message["body"][field] = "<id>"
+        for attachment in message.get("attachments", []):
+            for field in ("artifact_id", "text_artifact_id"):
+                if attachment.get(field):
+                    attachment[field] = "<id>"
+    return masked

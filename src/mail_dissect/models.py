@@ -6,9 +6,9 @@ matches the table in `docs/SPEC.md`.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 ObservableType = Literal["url", "domain", "ip", "email", "hash", "filename"]
 ObservableSubtype = Literal["ipv4", "ipv6", "md5", "sha1", "sha256", "sha512"]
@@ -55,22 +55,22 @@ class AuthResultOut(BaseModel):
 
 
 class ReceivedOut(BaseModel):
+    """One `Received` hop.
+
+    `with` and `for` are Python keywords and contract field names at the same time, so they
+    are aliased on serialisation, and the response is dumped with `by_alias=True`. Overriding
+    `model_dump` here instead is silently skipped whenever a parent model dumps this one.
+    """
+
     from_host: str | None = None
     from_ip: str | None = None
     by_host: str | None = None
-    with_: str | None = None
+    with_: str | None = Field(default=None, serialization_alias="with")
     id: str | None = None
-    for_: str | None = None
+    for_: str | None = Field(default=None, serialization_alias="for")
     timestamp: str | None = None
 
     model_config = {"populate_by_name": True}
-
-    def model_dump(self, **kwargs: Any) -> dict[str, Any]:
-        data = super().model_dump(**kwargs)
-        # `with` and `for` are keywords in Python but field names in the contract.
-        data["with"] = data.pop("with_", None)
-        data["for"] = data.pop("for_", None)
-        return data
 
 
 class BodyOut(BaseModel):

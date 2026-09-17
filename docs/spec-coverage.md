@@ -34,22 +34,22 @@ disagree, the specification is right and this file is stale.
 
 | # | Case | SPEC.md | Test |
 | --- | --- | --- | --- |
-| 1 | simple single-part `text/plain` | §6.3 | stage 2 |
-| 2 | `multipart/alternative` with HTML and text | §6.3 | stage 2 |
-| 3 | nested `message/rfc822` carries the original, not the envelope | §6.2 | stage 2 |
-| 4 | two nestings in one message, and a two-level nesting | §6.2 | stage 2 |
+| 1 | simple single-part `text/plain` | §6.3 | `test_mime::test_simple_single_part` |
+| 2 | `multipart/alternative` with HTML and text | §6.3 | `test_mime::test_alternative_with_html_and_text` |
+| 3 | nested `message/rfc822` carries the original, not the envelope | §6.2 | `test_mime::test_nested_message_is_the_original` |
+| 4 | two nestings in one message, and a two-level nesting | §6.2 | `test_mime::test_two_nestings_and_a_two_level_nesting` |
 | 5 | long URL broken by `quoted-printable` is recovered whole | §7.2 | stage 3 |
 | 6 | link rewritten by a reversible wrapper | §10 | stage 3 |
 | 7 | link rewritten by a wrapper outside the table — unchanged, no network call | §10 | stage 3 |
-| 8 | RFC 2047 headers and an 8-bit body disagreeing with its declaration | §7, §7.2 | stage 2 |
-| 9 | damaged MIME → `malformed_mime` plus a partial result | §15 | stage 2 |
-| 10 | oversized attachment → `truncated`, rest of the dissection complete | §15 | stage 2 |
-| 11 | `sha256` of the message and attachments matches an independent computation | §13.2 | stage 2 |
+| 8 | RFC 2047 headers and an 8-bit body disagreeing with its declaration | §7, §7.2 | `test_mime::test_encoded_headers_and_eight_bit_body` |
+| 9 | damaged MIME → `malformed_mime` plus a partial result | §15 | `test_mime::test_damaged_mime_is_normal_input` |
+| 10 | oversized attachment → `truncated`, rest of the dissection complete | §15 | `test_mime::test_oversized_attachment` |
+| 11 | `sha256` of the message and attachments matches an independent computation | §13.2 | `test_mime::test_all_three_hashes_match_an_independent_computation` |
 | 12 | full dissection with no name resolution and no route out | §2 | `conftest::_no_network` + CI `isolation` job |
 | 13 | optional dependencies disabled → `tools{}` says so, result complete otherwise | §14 | stage 1 / 5 |
 | 14 | artifact past its lifetime, without a restart → `ARTIFACT_EXPIRED` (410) | §13.4 | `test_artifacts::test_expired_artifact_is_410_without_a_restart` |
-| 15 | two nestings with HTML each → two `body_html` artifacts, different `message_index` | §13.1 | stage 2 |
-| 16 | attachment with broken encoding → `attachment_unreadable`, hashes `null` | §15 | stage 2 |
+| 15 | two nestings with HTML each → two `body_html` artifacts, different `message_index` | §13.1 | `test_mime::test_two_nestings_with_html_give_two_body_artifacts` |
+| 16 | attachment with broken encoding → `attachment_unreadable`, hashes `null` | §15 | `test_mime::test_attachment_with_broken_encoding` |
 | 17 | message over the input limit → `TOO_LARGE` (413), no parse attempted | §15, §16 | `test_intake::test_message_over_the_input_limit` |
 | 18 | request for an artifact listing → 404, never an enumeration | §4 | `test_artifacts::test_no_listing_endpoint` |
 | 19 | artifact after a restart → `ARTIFACT_NOT_FOUND` (404) | §13.4 | `test_artifacts::test_artifact_from_a_previous_process_life_is_404` |
@@ -63,42 +63,42 @@ disagree, the specification is right and this file is stale.
 | 27 | IDN host in uppercase → punycode and lowercase in `value`, path untouched | §11.3 | stage 4 |
 | 28 | private address `10.0.0.5` → present, not filtered | §11.3 | stage 4 |
 | 29 | a binary file sent as a message → `UNPARSABLE` (422) | §15, §16 | `test_intake::test_binary_file_is_unparsable` |
-| 30 | one valid header and garbage after it → 200 with `malformed_mime` | §15 | `test_intake::test_one_header_and_garbage_is_accepted` (the `malformed_mime` half: stage 2) |
+| 30 | one valid header and garbage after it → 200 with `malformed_mime` | §15 | `test_intake::test_one_header_and_garbage_is_accepted` (+ `…binary_body_is_not_damage`) |
 | 31 | artifact write impossible → success, `artifact_id: null`, `artifact_store_failed` | §13.4, §8 | `test_artifacts::test_failed_artifact_write_still_dissects` |
 | 32 | `README.md`/`raport.zip` ambiguous; `faktura.pdf`/`example.com` not | §11.3 | stage 4 |
 | 33 | `wersja.1.2` → no `domain` candidate | §11.2 | `test_registries::test_public_suffix` (registry half; observable half stage 4) |
 | 34 | `bit.ly/xyz` and `www.example.com` → `url` plus their hosts as `domain` | §11.2 | stage 4 |
 | 35 | email address in content → `email` plus its domain as `domain` | §11.2 | stage 4 |
 | 36 | `/v1/health` → 200 with dependencies off, all fields, registry versions | §14.3, §12 | `test_health::test_health_reports_registry_versions_with_tools_disabled` |
-| 37 | `multipart/mixed` with two `text/plain` → first is the body | §6.3 | stage 2 |
+| 37 | `multipart/mixed` with two `text/plain` → first is the body | §6.3 | `test_mime::test_mixed_with_two_text_parts` |
 | 38 | `multipart/related` with `alternative` inside and a `cid:` image | §6.3, §9.1 | stage 3 |
-| 39 | two attachments with identical names → distinct `part_index` | §5.2 | stage 2 |
+| 39 | two attachments with identical names → distinct `part_index` | §5.2 | `test_mime::test_two_attachments_with_the_same_name` |
 | 40 | wrapper inside a wrapper → unwrapped to a fixed point | §10 | stage 3 |
 | 41 | entry matches but the target cannot be extracted → `unwrap_failed: true` | §10 | stage 3 |
 | 42 | malformed `UNWRAPPERS` → the service does not start | §10, §19 | `test_settings::test_malformed_unwrappers_stop_the_service` |
-| 43 | address decomposition across `From`, `To`, `Reply-To` | §7 | stage 2 |
-| 44 | three-hop `Received` chain, `null` where the header was incomplete | §7 | stage 2 |
-| 45 | `Authentication-Results` with four methods including a non-standard one | §7 | stage 2 |
+| 43 | address decomposition across `From`, `To`, `Reply-To` | §7 | `test_mime::test_address_decomposition` |
+| 44 | three-hop `Received` chain, `null` where the header was incomplete | §7 | `test_mime::test_received_chain` |
+| 45 | `Authentication-Results` with four methods including a non-standard one | §7 | `test_mime::test_authentication_results_with_four_methods` |
 | 46 | `headers` completeness: custom and repeated headers | §7 | `test_intake::test_headers_are_complete_and_ordered` |
-| 47 | declared type ≠ detected type, with no comment from the service | §7.1 | stage 2 |
-| 48 | `charset_declared` ≠ `charset_used`, `encoding_fallback`, content readable | §7.2 | stage 2 |
+| 47 | declared type ≠ detected type, with no comment from the service | §7.1 | `test_mime::test_declared_type_differs_from_detected` |
+| 48 | `charset_declared` ≠ `charset_used`, `encoding_fallback`, content readable | §7.2 | `test_mime::test_declared_charset_differs_from_used` + `test_decode::test_the_ladder` |
 | 49 | `text_from_html` with and without a `text/plain` part | §9.3 | stage 3 |
 | 50 | inline threshold for `html` and for `text_from_html` | §8 | stage 3 |
-| 51 | all three hashes for the message and every attachment | §13.2 | stage 2 |
+| 51 | all three hashes for the message and every attachment | §13.2 | `test_mime::test_all_three_hashes_match_an_independent_computation` |
 | 52 | working Tika → `attachment_text`, candidates with an `attachment` source | §14.1 | stage 5 |
 | 53 | working renderer → `screenshot` artifact with `message_index` | §14.2 | stage 5 |
 | 54 | whole-dissection budget exceeded → 200, `ok: true`, `truncated` | §15 | stage 5 |
 | 55 | unknown `artifact_id` with a valid `dissect_id` → 404 | §16 | `test_artifacts::test_unknown_artifact_id_with_a_valid_dissect_id` |
 | 56 | candidates from headers carry `header_name` and `header_index` | §11.1 | stage 4 |
-| 57 | artifact response headers: octet-stream, sanitised filename, nosniff | §13.3 | `test_artifacts::test_artifact_response_never_echoes_the_message` (attachment name: stage 2) |
+| 57 | artifact response headers: octet-stream, sanitised filename, nosniff | §13.3 | `test_mime::test_attachment_filename_is_sanitised_in_the_response_header` |
 | 58 | mixed tool outcome → worst wins (`timeout`), per-item links still correct | §14 | stage 5 |
 | 59 | nested message screenshot → two `screenshot` artifacts | §13.1, §14.2 | stage 5 |
 | 60 | rewritten resource → target in `href`, `rewritten_from`, `unwrap_failed` on failure | §10 | stage 3 |
 | 61 | health and dependencies: `disabled` with no traffic, `down`, one probe per TTL | §14.3 | `test_health::test_disabled_tools_are_never_probed`, `…_unreachable_tools_are_down…` |
 | 62 | stable core of `observables[]` with and without document extraction | §11.1 | stage 5 |
-| 63 | nested original byte-for-byte, hash matching an independent computation | §13.2 | stage 2 |
-| 64 | transport-encoded nesting → a parsed message, `eml` after decoding | §6.2 | stage 2 |
-| 65 | part count far over the limit → `truncated` in scan time, no full tree | §15 | stage 2 |
+| 63 | nested original byte-for-byte, hash matching an independent computation | §13.2 | `test_mime::test_nested_original_is_byte_identical` |
+| 64 | transport-encoded nesting → a parsed message, `eml` after decoding | §6.2 | `test_mime::test_transport_encoded_nesting_is_still_a_message` |
+| 65 | part count far over the limit → `truncated` in scan time, no full tree | §15 | `test_mime::test_part_count_far_over_the_limit_is_cut_in_scan_time` |
 | 66 | `payload.scr` in body text → no candidate with an empty supplement, a `filename` candidate with `EXTRA_FILE_EXTENSIONS=scr` | §12, §11.2 | registry half: `test_registries::test_the_supplement_is_additive_and_changes_the_version`; observable half: stage 4 |
 
 ## Resilience

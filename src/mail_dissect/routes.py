@@ -2,28 +2,16 @@
 
 from __future__ import annotations
 
-import dataclasses
-import hashlib
-from typing import Any
-
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, JSONResponse
 
 from . import __version__
 from .artifacts import Lookup, content_disposition, valid_id
+from .dissect import build_response
 from .errors import AppError, new_dissect_id
-from .headers import header_map
 from .intake import boundary_of, extract_form_field, looks_like_message
 from .jsonlog import log_event
-from .models import (
-    ArtifactOut,
-    DissectResponse,
-    HealthOut,
-    MessageOut,
-    RegistryVersionsOut,
-    SourceHashes,
-    scrub_surrogates,
-)
+from .models import HealthOut, RegistryVersionsOut
 
 router = APIRouter(prefix="/v1")
 
@@ -74,56 +62,17 @@ async def dissect(request: Request) -> JSONResponse:
             "UNPARSABLE", "input has no header line before the first empty line", dissect_id
         )
 
-    flags: list[Any] = []
-    headers = header_map(raw)
-    scrubbed: dict[str, list[str]] = {}
-    changed = False
-    for name, values in headers.items():
-        cleaned = []
-        for value in values:
-            safe, was_changed = scrub_surrogates(value)
-            changed = changed or was_changed
-            cleaned.append(safe)
-        scrubbed[name] = cleaned
-    if changed:
-        # [D20]: the returned string is no longer what stood in the material, so say so.
-        flags.append("encoding_fallback")
-
-    header_block = raw.split(b"\r\n\r\n", 1)[0].split(b"\n\n", 1)[0]
-    artifacts = []
-    # [D12]: the eml artifact carries the input bytes, never a reconstruction.
-    for kind, payload, name in (
-        ("eml", raw, "message.eml"),
-        ("headers", header_block, "headers.txt"),
-    ):
-        ref = store.put(dissect_id, kind, payload, message_index=0, filename=name)
-        if ref is None:
-            if "artifact_store_failed" not in flags:
-                flags.append("artifact_store_failed")
-            continue
-        artifacts.append(ref)
-
-    response = DissectResponse(
-        dissect_id=dissect_id,
-        source=SourceHashes(
-            size=len(raw),
-            md5=hashlib.md5(raw, usedforsecurity=False).hexdigest(),
-            sha1=hashlib.sha1(raw, usedforsecurity=False).hexdigest(),
-            sha256=hashlib.sha256(raw).hexdigest(),
-        ),
-        messages=[MessageOut(index=0, depth=0, headers=scrubbed)],
-        artifacts=[ArtifactOut(**dataclasses.asdict(ref)) for ref in artifacts],
-        flags=flags,
-    )
+    response = build_response(raw, dissect_id, store, settings)
     log_event(
         "dissect",
         dissect_id=dissect_id,
         size=len(raw),
         messages=len(response.messages),
-        flags=flags,
+        artifacts=len(response.artifacts),
+        flags=response.flags,
         duration_ms=round((clock() - started) * 1000, 1),
     )
-    return JSONResponse(content=response.model_dump())
+    return JSONResponse(content=response.model_dump(by_alias=True))
 
 
 @router.get("/artifact/{dissect_id}/{artifact_id}")

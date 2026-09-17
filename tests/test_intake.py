@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 
-from conftest import SIMPLE, dissect
+from conftest import SIMPLE, dissect, mask_environment
 from fastapi.testclient import TestClient
 
 from mail_dissect.settings import Settings
@@ -17,10 +17,10 @@ def test_both_channels_give_identical_results(client: TestClient) -> None:
     assert form.status_code == 200
     through_form = form.json()
 
-    for field in ("source", "messages", "tools", "flags"):
-        assert through_form[field] == raw[field], field
-    # Only what the contract excludes from determinism may differ (SPEC §17).
+    # Identical apart from what SPEC §17 excludes: the random identifiers, and nothing else.
+    assert mask_environment(through_form) == mask_environment(raw)
     assert through_form["dissect_id"] != raw["dissect_id"]
+    assert through_form["source"] == raw["source"]
 
 
 def test_large_field_survives_the_form_channel(client: TestClient) -> None:
@@ -50,10 +50,24 @@ def test_binary_file_is_unparsable(client: TestClient) -> None:
 
 
 def test_one_header_and_garbage_is_accepted(client: TestClient) -> None:
-    """Test 30: the boundary is the presence of a header, not the quality of the rest."""
-    body = dissect(client, b"X-Only: yes\r\n\r\n\x00\x01\x02 garbage \xff\xfe")
+    """Test 30: the boundary is the presence of a header, not the quality of the rest.
+
+    Garbage *instead of* further headers is what makes this damaged rather than merely
+    binary: the header block ends at the first line that is not one, and the parser says so.
+    A message with one header and a binary body is not damaged at all, and the control below
+    keeps the flag from becoming decoration.
+    """
+    body = dissect(client, b"X-Only: yes\r\nthis is not a header at all\r\n\r\nbody")
     assert body["ok"] is True
     assert body["messages"][0]["headers"] == {"x-only": ["yes"]}
+    assert "malformed_mime" in body["flags"]
+
+
+def test_a_binary_body_is_not_damage(client: TestClient) -> None:
+    """The control for test 30: nothing about this message is malformed."""
+    body = dissect(client, b"X-Only: yes\r\n\r\n\x00\x01\x02 binary \xff\xfe")
+    assert body["ok"] is True
+    assert body["flags"] == []
 
 
 def test_mbox_envelope_line_does_not_hide_the_headers(client: TestClient) -> None:
