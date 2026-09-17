@@ -1,0 +1,68 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions: { contents: read }
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy --strict src
+      - run: uv run pytest -q --cov --cov-fail-under=90
+
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # DOCKER_BUILDKIT=0: the Dockerfile must stay buildable with the classic builder, so a
+      # machine without BuildKit is never a surprise. Claiming it is not enough - CI checks.
+      - run: DOCKER_BUILDKIT=0 docker build -t mail-dissect:ci .
+      - name: The service answers its own contract
+        run: |
+          docker run -d --name md -p 127.0.0.1:8000:8000 mail-dissect:ci
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8000/v1/health >/dev/null && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8000/v1/health | tee /tmp/health.json
+          python3 -c "import json;h=json.load(open('/tmp/health.json'));assert h['ok'];assert h['tools']=={'tika':'disabled','renderer':'disabled'};assert '+icann/' in h['registries']['public_suffix_list']"
+          # A binary file is not a message, and the refusal is enveloped (SPEC §16).
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST --data-binary '%PDF-1.4 x' \
+            -H 'content-type: message/rfc822' http://127.0.0.1:8000/v1/dissect)" = "422"
+          docker rm -f md
+
+  isolation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # SPEC §2 is a functional requirement, so it is tested the only honest way: with no
+      # network at all. The pytest socket guard covers the inside; this covers the claim.
+      - run: DOCKER_BUILDKIT=0 docker build -t mail-dissect:ci .
+      - name: A full dissection with no route out and no name resolution
+        run: |
+          docker run --rm --network none mail-dissect:ci python -c "
+          from fastapi.testclient import TestClient
+          from mail_dissect.app import create_app
+          from mail_dissect.settings import Settings
+          raw = b'From: a@example.com\r\nSubject: hi\r\n\r\nbody'
+          with TestClient(create_app(Settings(_env_file=None))) as c:
+              r = c.post('/v1/dissect', content=raw, headers={'content-type': 'message/rfc822'})
+              assert r.status_code == 200, r.text
+              body = r.json()
+              assert body['source']['size'] == len(raw)
+              aid = next(a['artifact_id'] for a in body['artifacts'] if a['kind'] == 'eml')
+              got = c.get('/v1/artifact/' + body['dissect_id'] + '/' + aid)
+              assert got.content == raw, 'the eml artifact must be the input bytes'
+              assert c.get('/v1/health').json()['ok'] is True
+          print('full dissection completed with no network')
+          "

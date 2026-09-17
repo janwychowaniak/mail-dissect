@@ -1,0 +1,68 @@
+# The full deployment: the service plus both optional tools (SPEC §14).
+#
+# This example shows ISOLATION, not just wiring. The specification cannot require hardening
+# of a component it does not control, so this file is the only place where the
+# recommendations of SPEC §14.2 become visible - and an example without them would teach the
+# opposite of the document next to it.
+#
+# Tool versions are pinned on purpose: an example that breaks after someone else's release
+# is worse than no example, and this is the pair the acceptance tests were run against.
+
+services:
+  mail-dissect:
+    build: .
+    image: ghcr.io/janwychowaniak/mail-dissect:latest
+    container_name: mail-dissect
+    restart: unless-stopped
+    environment:
+      TIKA_URL: http://tika:9998/tika
+      SCREENSHOT_URL: http://renderer:3000/forms/chromium/screenshot/html
+    # Published on the loopback interface only. The service is unauthenticated by design
+    # (SPEC §3); widening this without an authenticating layer in front is the one change
+    # that turns a safe default into an exposed one.
+    ports:
+      - "127.0.0.1:${MAIL_DISSECT_PORT:-8000}:8000"
+    # Somebody else's correspondence has no reason to touch persistent storage, and on stop
+    # it disappears with the memory (SPEC §13.4).
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    networks: [tools]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  tika:
+    # The minimal variant on purpose: extracting text from office documents does not need
+    # OCR and the rest, and every extra parser is more surface reading a hostile file.
+    image: apache/tika:3.2.3.0
+    container_name: mail-dissect-tika
+    restart: unless-stopped
+    networks: [tools]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  renderer:
+    image: gotenberg/gotenberg:8.24.2
+    container_name: mail-dissect-renderer
+    restart: unless-stopped
+    command:
+      - gotenberg
+      # Mail clients do not run scripts, so a render without them is MORE faithful to what
+      # the recipient saw - this is not a trade-off between safety and quality (SPEC §14.2).
+      - --chromium-disable-javascript=true
+      # The message must not be able to make the renderer fetch anything.
+      - --chromium-deny-list=.*
+      - --chromium-max-queue-size=10
+      - --api-timeout=30s
+    networks: [tools]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+networks:
+  tools:
+    # No route out for any of the three. The service is designed to work in a network
+    # without one, and so are the tools: they need access to nothing but the service
+    # (SPEC §14). This is a functional requirement, not a precaution.
+    internal: true

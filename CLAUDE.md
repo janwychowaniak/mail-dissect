@@ -47,6 +47,7 @@ uv sync --frozen
 uv run ruff check . && uv run ruff format --check .
 uv run mypy --strict src
 uv run pytest -q                        # offline; the socket guard is autouse
+uv run pytest -q --cov --cov-fail-under=90   # what CI gates on [D17]
 uv run pytest -q -m fuzz                # the long fuzz run, random seed
 DOCKER_BUILDKIT=0 docker build -t mail-dissect:dev .
 ```

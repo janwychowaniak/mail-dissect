@@ -1,0 +1,223 @@
+"""Response models. Every closed value set of SPEC §5.1 is a `Literal` here.
+
+Widening one of these is a `/v2` change, not an edit: a test asserts that each set still
+matches the table in `docs/SPEC.md`.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Literal
+
+from pydantic import BaseModel
+
+ObservableType = Literal["url", "domain", "ip", "email", "hash", "filename"]
+ObservableSubtype = Literal["ipv4", "ipv6", "md5", "sha1", "sha256", "sha512"]
+SourceKind = Literal["body_text", "body_html", "header", "attachment"]
+ArtifactKind = Literal[
+    "eml",
+    "headers",
+    "body_text",
+    "body_html",
+    "body_text_from_html",
+    "attachment",
+    "attachment_text",
+    "screenshot",
+]
+ToolState = Literal["ok", "down", "timeout", "skipped", "disabled"]
+Flag = Literal[
+    "truncated",
+    "malformed_mime",
+    "encoding_fallback",
+    "attachment_unreadable",
+    "artifact_store_failed",
+]
+ResourceElement = Literal["img", "iframe", "link", "style", "other"]
+
+
+class SourceHashes(BaseModel):
+    size: int
+    md5: str
+    sha1: str
+    sha256: str
+
+
+class AddressOut(BaseModel):
+    display_name: str | None = None
+    address: str | None = None
+    local_part: str | None = None
+    domain: str | None = None
+
+
+class AuthResultOut(BaseModel):
+    method: str
+    result: str
+    params: dict[str, str] = {}
+
+
+class ReceivedOut(BaseModel):
+    from_host: str | None = None
+    from_ip: str | None = None
+    by_host: str | None = None
+    with_: str | None = None
+    id: str | None = None
+    for_: str | None = None
+    timestamp: str | None = None
+
+    model_config = {"populate_by_name": True}
+
+    def model_dump(self, **kwargs: Any) -> dict[str, Any]:
+        data = super().model_dump(**kwargs)
+        # `with` and `for` are keywords in Python but field names in the contract.
+        data["with"] = data.pop("with_", None)
+        data["for"] = data.pop("for_", None)
+        return data
+
+
+class BodyOut(BaseModel):
+    text: str | None = None
+    html: str | None = None
+    text_from_html: str | None = None
+    text_artifact_id: str | None = None
+    html_artifact_id: str | None = None
+    text_from_html_artifact_id: str | None = None
+    text_part_index: int | None = None
+    html_part_index: int | None = None
+
+
+class MimePartOut(BaseModel):
+    content_type: str
+    disposition: str | None = None
+    filename: str | None = None
+    content_id: str | None = None
+    size: int
+    charset_declared: str | None = None
+    charset_used: str | None = None
+    transfer_encoding: str | None = None
+
+
+class UrlFieldsOut(BaseModel):
+    href: str
+    scheme: str | None = None
+    host: str | None = None
+    port: int | None = None
+    userinfo: str | None = None
+    path: str | None = None
+    query: str | None = None
+    fragment: str | None = None
+    host_idn: str | None = None
+    host_punycode: str | None = None
+    rewritten_from: str | None = None
+    unwrap_failed: bool = False
+    cid_part: int | None = None
+
+
+class LinkOut(UrlFieldsOut):
+    text: str | None = None
+
+
+class ResourceOut(UrlFieldsOut):
+    element: ResourceElement
+
+
+class ObservableSourceOut(BaseModel):
+    kind: SourceKind
+    header_name: str | None = None
+    header_index: int | None = None
+    part_index: int | None = None
+
+
+class ObservableOut(BaseModel):
+    value: str
+    value_raw: str
+    type: ObservableType
+    subtype: ObservableSubtype | None = None
+    defanged: bool = False
+    ambiguous: bool = False
+    occurrences: int = 1
+    sources: list[ObservableSourceOut] = []
+
+
+class AttachmentOut(BaseModel):
+    part_index: int
+    artifact_id: str | None = None
+    text_artifact_id: str | None = None
+    filename: str | None = None
+    extension: str | None = None
+    disposition: str | None = None
+    content_id: str | None = None
+    declared_mime: str
+    detected_mime: str | None = None
+    size: int
+    md5: str | None = None
+    sha1: str | None = None
+    sha256: str | None = None
+
+
+class MessageOut(BaseModel):
+    index: int
+    depth: int
+    headers: dict[str, list[str]] = {}
+    addresses: dict[str, list[AddressOut]] = {}
+    auth: list[AuthResultOut] = []
+    received: list[ReceivedOut] = []
+    body: BodyOut = BodyOut()
+    mime_parts: list[MimePartOut] = []
+    links: list[LinkOut] = []
+    resources: list[ResourceOut] = []
+    observables: list[ObservableOut] = []
+    attachments: list[AttachmentOut] = []
+
+
+class ArtifactOut(BaseModel):
+    artifact_id: str
+    message_index: int
+    part_index: int | None = None
+    kind: ArtifactKind
+    filename: str
+    mime: str
+    size: int
+    sha256: str
+
+
+class ToolsOut(BaseModel):
+    tika: ToolState = "disabled"
+    renderer: ToolState = "disabled"
+
+
+class DissectResponse(BaseModel):
+    ok: bool = True
+    dissect_id: str
+    source: SourceHashes
+    messages: list[MessageOut] = []
+    artifacts: list[ArtifactOut] = []
+    tools: ToolsOut = ToolsOut()
+    flags: list[Flag] = []
+
+
+class RegistryVersionsOut(BaseModel):
+    public_suffix_list: str
+    file_extensions: str
+
+
+class HealthOut(BaseModel):
+    ok: bool
+    version: str
+    uptime_seconds: int
+    tools: ToolsOut
+    tools_checked_age_seconds: int | None
+    registries: RegistryVersionsOut
+
+
+def scrub_surrogates(value: str) -> tuple[str, bool]:
+    """Make a string serialisable, and say whether that changed it (F5, [D20]).
+
+    One 8-bit byte in a header can produce a lone surrogate, which raises inside the JSON
+    encoder on Starlette's path and would turn five bytes of input into a 500. Scrubbing is
+    mandatory — but the result is then no longer what stood in the material, so the caller
+    raises `encoding_fallback` rather than changing the answer silently.
+    """
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return value.encode("utf-8", "replace").decode("utf-8"), True
+    return value, False

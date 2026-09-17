@@ -45,15 +45,15 @@ disagree, the specification is right and this file is stale.
 | 9 | damaged MIME → `malformed_mime` plus a partial result | §15 | stage 2 |
 | 10 | oversized attachment → `truncated`, rest of the dissection complete | §15 | stage 2 |
 | 11 | `sha256` of the message and attachments matches an independent computation | §13.2 | stage 2 |
-| 12 | full dissection with no name resolution and no route out | §2 | stage 1 |
+| 12 | full dissection with no name resolution and no route out | §2 | `conftest::_no_network` + CI `isolation` job |
 | 13 | optional dependencies disabled → `tools{}` says so, result complete otherwise | §14 | stage 1 / 5 |
-| 14 | artifact past its lifetime, without a restart → `ARTIFACT_EXPIRED` (410) | §13.4 | stage 5 |
+| 14 | artifact past its lifetime, without a restart → `ARTIFACT_EXPIRED` (410) | §13.4 | `test_artifacts::test_expired_artifact_is_410_without_a_restart` |
 | 15 | two nestings with HTML each → two `body_html` artifacts, different `message_index` | §13.1 | stage 2 |
 | 16 | attachment with broken encoding → `attachment_unreadable`, hashes `null` | §15 | stage 2 |
-| 17 | message over the input limit → `TOO_LARGE` (413), no parse attempted | §15, §16 | stage 1 |
-| 18 | request for an artifact listing → 404, never an enumeration | §4 | stage 1 |
-| 19 | artifact after a restart → `ARTIFACT_NOT_FOUND` (404) | §13.4 | stage 2 |
-| 20 | the same input through both channels → identical results | §4 | stage 1 |
+| 17 | message over the input limit → `TOO_LARGE` (413), no parse attempted | §15, §16 | `test_intake::test_message_over_the_input_limit` |
+| 18 | request for an artifact listing → 404, never an enumeration | §4 | `test_artifacts::test_no_listing_endpoint` |
+| 19 | artifact after a restart → `ARTIFACT_NOT_FOUND` (404) | §13.4 | `test_artifacts::test_artifact_from_a_previous_process_life_is_404` |
+| 20 | the same input through both channels → identical results | §4 | `test_intake::test_both_channels_give_identical_results` |
 | 21 | `mailto:` anchor and `cid:` resource → both present, `host: null`, `cid_part` set | §9.1 | stage 3 |
 | 22 | remote image and an anchor with the same address → both lists, one observable | §11 | stage 4 |
 | 23 | URL with `userinfo` → `host` and `userinfo` split correctly | §9.1 | stage 3 |
@@ -62,24 +62,24 @@ disagree, the specification is right and this file is stale.
 | 26 | `raport.zip` → two candidates; `faktura.pdf` → only `filename` | §11.3 | stage 4 |
 | 27 | IDN host in uppercase → punycode and lowercase in `value`, path untouched | §11.3 | stage 4 |
 | 28 | private address `10.0.0.5` → present, not filtered | §11.3 | stage 4 |
-| 29 | a binary file sent as a message → `UNPARSABLE` (422) | §15, §16 | stage 1 |
-| 30 | one valid header and garbage after it → 200 with `malformed_mime` | §15 | stage 1 |
-| 31 | artifact write impossible → success, `artifact_id: null`, `artifact_store_failed` | §13.4, §8 | stage 2 |
+| 29 | a binary file sent as a message → `UNPARSABLE` (422) | §15, §16 | `test_intake::test_binary_file_is_unparsable` |
+| 30 | one valid header and garbage after it → 200 with `malformed_mime` | §15 | `test_intake::test_one_header_and_garbage_is_accepted` (the `malformed_mime` half: stage 2) |
+| 31 | artifact write impossible → success, `artifact_id: null`, `artifact_store_failed` | §13.4, §8 | `test_artifacts::test_failed_artifact_write_still_dissects` |
 | 32 | `README.md`/`raport.zip` ambiguous; `faktura.pdf`/`example.com` not | §11.3 | stage 4 |
-| 33 | `wersja.1.2` → no `domain` candidate | §11.2 | stage 4 |
+| 33 | `wersja.1.2` → no `domain` candidate | §11.2 | `test_registries::test_public_suffix` (registry half; observable half stage 4) |
 | 34 | `bit.ly/xyz` and `www.example.com` → `url` plus their hosts as `domain` | §11.2 | stage 4 |
 | 35 | email address in content → `email` plus its domain as `domain` | §11.2 | stage 4 |
-| 36 | `/v1/health` → 200 with dependencies off, all fields, registry versions | §14.3, §12 | stage 1 |
+| 36 | `/v1/health` → 200 with dependencies off, all fields, registry versions | §14.3, §12 | `test_health::test_health_reports_registry_versions_with_tools_disabled` |
 | 37 | `multipart/mixed` with two `text/plain` → first is the body | §6.3 | stage 2 |
 | 38 | `multipart/related` with `alternative` inside and a `cid:` image | §6.3, §9.1 | stage 3 |
 | 39 | two attachments with identical names → distinct `part_index` | §5.2 | stage 2 |
 | 40 | wrapper inside a wrapper → unwrapped to a fixed point | §10 | stage 3 |
 | 41 | entry matches but the target cannot be extracted → `unwrap_failed: true` | §10 | stage 3 |
-| 42 | malformed `UNWRAPPERS` → the service does not start | §10, §19 | stage 1 |
+| 42 | malformed `UNWRAPPERS` → the service does not start | §10, §19 | `test_settings::test_malformed_unwrappers_stop_the_service` |
 | 43 | address decomposition across `From`, `To`, `Reply-To` | §7 | stage 2 |
 | 44 | three-hop `Received` chain, `null` where the header was incomplete | §7 | stage 2 |
 | 45 | `Authentication-Results` with four methods including a non-standard one | §7 | stage 2 |
-| 46 | `headers` completeness: custom and repeated headers | §7 | stage 1 |
+| 46 | `headers` completeness: custom and repeated headers | §7 | `test_intake::test_headers_are_complete_and_ordered` |
 | 47 | declared type ≠ detected type, with no comment from the service | §7.1 | stage 2 |
 | 48 | `charset_declared` ≠ `charset_used`, `encoding_fallback`, content readable | §7.2 | stage 2 |
 | 49 | `text_from_html` with and without a `text/plain` part | §9.3 | stage 3 |
@@ -88,13 +88,13 @@ disagree, the specification is right and this file is stale.
 | 52 | working Tika → `attachment_text`, candidates with an `attachment` source | §14.1 | stage 5 |
 | 53 | working renderer → `screenshot` artifact with `message_index` | §14.2 | stage 5 |
 | 54 | whole-dissection budget exceeded → 200, `ok: true`, `truncated` | §15 | stage 5 |
-| 55 | unknown `artifact_id` with a valid `dissect_id` → 404 | §16 | stage 1 |
+| 55 | unknown `artifact_id` with a valid `dissect_id` → 404 | §16 | `test_artifacts::test_unknown_artifact_id_with_a_valid_dissect_id` |
 | 56 | candidates from headers carry `header_name` and `header_index` | §11.1 | stage 4 |
-| 57 | artifact response headers: octet-stream, sanitised filename, nosniff | §13.3 | stage 2 |
+| 57 | artifact response headers: octet-stream, sanitised filename, nosniff | §13.3 | `test_artifacts::test_artifact_response_never_echoes_the_message` (attachment name: stage 2) |
 | 58 | mixed tool outcome → worst wins (`timeout`), per-item links still correct | §14 | stage 5 |
 | 59 | nested message screenshot → two `screenshot` artifacts | §13.1, §14.2 | stage 5 |
 | 60 | rewritten resource → target in `href`, `rewritten_from`, `unwrap_failed` on failure | §10 | stage 3 |
-| 61 | health and dependencies: `disabled` with no traffic, `down`, one probe per TTL | §14.3 | stage 1 / 5 |
+| 61 | health and dependencies: `disabled` with no traffic, `down`, one probe per TTL | §14.3 | `test_health::test_disabled_tools_are_never_probed`, `…_unreachable_tools_are_down…` |
 | 62 | stable core of `observables[]` with and without document extraction | §11.1 | stage 5 |
 | 63 | nested original byte-for-byte, hash matching an independent computation | §13.2 | stage 2 |
 | 64 | transport-encoded nesting → a parsed message, `eml` after decoding | §6.2 | stage 2 |

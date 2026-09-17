@@ -82,9 +82,7 @@ def f1b_header_line_traps() -> None:
         print(f"    {line!r:26s} matches={bool(headerRE.match(line))}")
     cases = {
         "only header, starts with 'From '": b"From : a@example.com\r\n\r\nbody",
-        "among valid headers": (
-            b"From: a@example.com\r\nX-Broken : yes\r\nSubject: s\r\n\r\nbody"
-        ),
+        "among valid headers": (b"From: a@example.com\r\nX-Broken : yes\r\nSubject: s\r\n\r\nbody"),
     }
     for label, raw in cases.items():
         msg = message_from_bytes(raw, policy=email.policy.compat32)
@@ -129,8 +127,16 @@ def f3_policy_cost() -> None:
         parts = b"".join(
             CRLF.join([b"--BB", b"Content-Type: text/plain", b"", b"x", b""]) for _ in range(count)
         )
-        raw = CRLF.join([b"Content-Type: multipart/mixed; boundary=BB", b"", b""]) + parts + b"--BB--" + CRLF
-        for name, policy in (("compat32", email.policy.compat32), ("default", email.policy.default)):
+        raw = (
+            CRLF.join([b"Content-Type: multipart/mixed; boundary=BB", b"", b""])
+            + parts
+            + b"--BB--"
+            + CRLF
+        )
+        for name, policy in (
+            ("compat32", email.policy.compat32),
+            ("default", email.policy.default),
+        ):
             start = time.perf_counter()
             msg = BytesParser(policy=policy).parsebytes(raw)
             parsed = time.perf_counter() - start
@@ -147,21 +153,27 @@ def f4_filename_extraction() -> None:
     """Which policy reads RFC 2231 and RFC 2047 filenames correctly?"""
     _banner("F4", "attachment filename extraction")
     cases = {
-        "RFC 2231 encoded": b'Content-Disposition: attachment; filename*=UTF-8\'\'%E2%82%AC.txt',
+        "RFC 2231 encoded": b"Content-Disposition: attachment; filename*=UTF-8''%E2%82%AC.txt",
         "RFC 2231 continued": (
             b'Content-Disposition: attachment; filename*0="long-"; filename*1="name.txt"'
         ),
-        "RFC 2047 in filename": b'Content-Disposition: attachment; filename="=?utf-8?q?caf=C3=A9.txt?="',
+        "RFC 2047 in filename": (
+            b'Content-Disposition: attachment; filename="=?utf-8?q?caf=C3=A9.txt?="'
+        ),
         "plain quoted": b'Content-Disposition: attachment; filename="plain.txt"',
         "path in filename": b'Content-Disposition: attachment; filename="../../etc/passwd"',
     }
     for label, header in cases.items():
         raw = header + CRLF + CRLF + b"x" + CRLF
         row = []
-        for name, policy in (("compat32", email.policy.compat32), ("default", email.policy.default)):
+        for name, policy in (
+            ("compat32", email.policy.compat32),
+            ("default", email.policy.default),
+        ):
             msg = message_from_bytes(raw, policy=policy)
             row.append(f"{name}={msg.get_filename()!r}")
         print(f"{label:22s} {'  '.join(row)}")
+
 
 def f5_lone_surrogate_breaks_json() -> None:
     """Can a header make the response unserialisable on Starlette's JSON path?"""
@@ -195,12 +207,23 @@ def f6_address_header_registry_coverage() -> None:
     _banner("F6", "HeaderRegistry coverage of address headers")
     registry = HeaderRegistry()
     names = [
-        "from", "to", "cc", "bcc", "reply-to", "sender", "return-path",
-        "resent-from", "resent-to", "resent-cc", "resent-sender", "resent-reply-to",
+        "from",
+        "to",
+        "cc",
+        "bcc",
+        "reply-to",
+        "sender",
+        "return-path",
+        "resent-from",
+        "resent-to",
+        "resent-cc",
+        "resent-sender",
+        "resent-reply-to",
     ]
     for name in names:
         header = registry(name, "a@example.com")
-        print(f"{name:18s} class={type(header).__mro__[1].__name__:28s} addresses={hasattr(header, 'addresses')}")
+        kind = type(header).__mro__[1].__name__
+        print(f"{name:18s} class={kind:28s} addresses={hasattr(header, 'addresses')}")
 
 
 def f7_rfc2047_decoding_paths() -> None:
@@ -219,7 +242,7 @@ def f7_rfc2047_decoding_paths() -> None:
         try:
             legacy = str(make_header(decode_header(sample)))
             legacy_note = repr(legacy)
-        except Exception as exc:  # noqa: BLE001 - the point of the probe
+        except Exception as exc:
             legacy_note = f"{type(exc).__name__}: {exc}"
         modern = str(registry("subject", sample))
         print(f"{sample!r}\n    make_header -> {legacy_note}\n    registry    -> {modern!r}")
@@ -238,7 +261,9 @@ def f8_broken_encodings_do_not_raise() -> None:
         msg = message_from_bytes(raw, policy=email.policy.compat32)
         payload = msg.get_payload(decode=True)
         defects = [type(d).__name__ for d in msg.defects]
-        print(f"{label:24s} type={msg.get_content_type():12s} payload={payload!r} defects={defects}")
+        print(
+            f"{label:24s} type={msg.get_content_type():12s} payload={payload!r} defects={defects}"
+        )
 
 
 def f10_html_parser_survives_hostile_input() -> None:
@@ -273,7 +298,7 @@ def f10_html_parser_survives_hostile_input() -> None:
             parser.feed(doc)
             parser.close()
             note = f"ok starts={parser.starts} chars={parser.chars}"
-        except Exception as exc:  # noqa: BLE001 - the point of the probe
+        except Exception as exc:
             note = f"{type(exc).__name__}: {exc}"
         print(f"{label:22s} {time.perf_counter() - start:6.2f}s  {note}")
 

@@ -1,0 +1,25 @@
+{
+  "public_suffix_list": {
+    "source_url": "https://publicsuffix.org/list/public_suffix_list.dat",
+    "fetched": "2026-09-17",
+    "upstream_version": "2026-09-15_10-18-26_UTC",
+    "section": "icann",
+    "sha256": "bb3d3bb844f1d172de41f0c5089e7b2b7243b02698e4a64120ffcf49ec84c0ee",
+    "license": "MPL-2.0",
+    "license_url": "https://mozilla.org/MPL/2.0/",
+    "file": "public_suffix_list.dat",
+    "note": "Stored unmodified. Only the ICANN section is loaded at runtime (SPEC D21); the section is named in the version string because it changes recognition.",
+    "version": "2026-09-15_10-18-26_UTC+icann/bb3d3bb844f1"
+  },
+  "file_extensions": {
+    "source_url": "https://cdn.jsdelivr.net/npm/mime-db@1.54.0/db.json",
+    "fetched": "2026-09-17",
+    "upstream_version": "1.54.0",
+    "sha256": "96b8a5746867c832ab56743c05e46e73c9facb04879677df0b356f20496cb6cd",
+    "license": "MIT",
+    "license_url": "https://github.com/jshttp/mime-db/blob/master/LICENSE",
+    "file": "mime-db.json",
+    "note": "Stored unmodified; the extension set is derived at load time.",
+    "version": "mime-db@1.54.0/96b8a5746867"
+  }
+}
