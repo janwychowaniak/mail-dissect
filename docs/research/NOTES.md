@@ -214,6 +214,35 @@ never a candidate (SPEC §11.2), so the gap only touches filenames the message t
 This is a property of the registry, not a defect in the grammar. Closing it would mean adding
 a second registry, not a list of our own — which is a decision, not an implementation detail.
 
+## F14 — the `domain`/`filename` collision covers ordinary mail, not corner cases
+
+Two registries genuinely claim the same string whenever a public suffix is also a file
+extension. Measured against the shipped snapshots:
+
+**60 of the 1441 single-label ICANN suffixes are also mime-db extensions** — 4.2%, but the
+4.2% contains `com` (`application/x-msdownload`) and `org` (`text/x-org`), along with `zip`,
+`mov`, `md`, `sh`, `xyz`, `ai`, `me`, `cc` and `pl`. `net`, `info`, `io`, `dev` and `app` do
+not collide.
+
+Measured again over a corpus of **70 real messages** (101 counting nested ones), on a
+deployment configured for its own environment:
+
+| | |
+| --- | --- |
+| `filename` candidates | 485 |
+| of those, produced by the collision | **483** |
+| genuinely unambiguous filenames | 2, both `.pdf` |
+| occurrences with the extension `com` | 938 |
+| occurrences with the extension `pl` (a Perl script) | 21 |
+| messages affected | **all 70** |
+
+So a consumer reading `observables[]` without filtering on `ambiguous` sees roughly twice
+the list they expected, in every message, and will read it as a defect. It is not: the rule
+is working, and subtracting these extensions from the registry would be a worse cure than the
+disease — `com` really is an executable extension (`command.com`) and `pl` really is a Perl
+script, so removing them blinds the channel exactly where it earns its place. The flag is the
+answer, and dropping one side of a collision costs the consumer a single condition.
+
 ## Open, to be probed in stage 1 (needs the project's dependencies installed)
 
 - **Starlette multipart limits.** Whether a non-file `eml` part is capped and text-decoded

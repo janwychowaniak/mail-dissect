@@ -492,8 +492,11 @@ from URLs by a fixed rule: strip trailing `.,;:!?"'`, then strip unbalanced `)]}
   `filename` candidate beside it, both flagged. `net`, `info`, `io`, `dev` and `app` do not
   collide. This is the rule working rather than failing — two registries genuinely claim the
   string, and the flag is what lets a consumer drop one side with a single condition — but it
-  is a larger share of ordinary mail than the `raport.zip` example suggests, and a consumer
-  reading `observables[]` without filtering on `ambiguous` will see it immediately. **The flag concerns this collision
+  is a larger share of ordinary mail than the `raport.zip` example suggests. **Expect the
+  collision in every message, not in corner cases:** over a corpus of 70 real messages, 483
+  of 485 `filename` candidates were collision twins and every message was affected (F14). A
+  consumer reading `observables[]` without filtering on `ambiguous` will see a list about
+  twice the length they expected, and should not read that as a defect. **The flag concerns this collision
   only** and does not mean "careful, this might be a coincidence": a version number that looks
   like an IP address, or an identifier that looks like a hash, are recognised without
   reservation, because grammatically that is what they are.

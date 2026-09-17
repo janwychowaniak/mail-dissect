@@ -5,6 +5,8 @@ Acceptance cases 22, 24, 25, 26, 27, 28, 32, 33, 34, 35, 56, 66.
 
 from __future__ import annotations
 
+import time
+
 import builders as b
 from conftest import FakeClock, dissect
 from fastapi.testclient import TestClient
@@ -99,10 +101,16 @@ def test_defanged_address_is_re_armed_and_marked(client: TestClient) -> None:
     """Test 25: the difference comes from re-arming, not from normalisation."""
     found = _observables(client, "Do not visit hxxp://zly[.]host or a(at)b[.]com.")
 
-    url = _of_type(found, "url")[0]
-    assert url["value"] == "http://zly.host"
-    assert url["value_raw"] == "hxxp://zly[.]host"
-    assert url["defanged"] is True
+    urls = _of_type(found, "url")
+    assert len(urls) == 1
+    assert urls[0]["value"] == "http://zly.host"
+    assert urls[0]["value_raw"] == "hxxp://zly[.]host"
+    assert urls[0]["defanged"] is True
+    # The other half of the proof: `hxxp:` is a syntactically valid scheme, so a URL
+    # alternative ahead of the defanged one does not fail to match - it matches and stops at
+    # the first bracket. Asserting only that the re-armed candidate exists would pass while
+    # a truncated `hxxp://zly[` sat beside it.
+    assert not any("[" in o["value"] or o["value"].endswith("//zly") for o in found)
 
     email = _of_type(found, "email")[0]
     assert email["value"] == "a@b.com"
@@ -224,3 +232,23 @@ def test_the_extension_supplement_changes_recognition(settings: Settings, clock:
         found = _observables(client, text)
     assert _values(found, "filename") == ["payload.scr"]
     assert found[0]["ambiguous"] is False  # `scr` is not a public suffix
+
+
+def test_a_base64_heavy_body_does_not_blow_up_the_scan(client: TestClient) -> None:
+    """The grammar must stay linear on long unbroken runs, which mail is full of.
+
+    Any "run of characters, then a required marker" construction backtracks over the whole
+    run at every position where the marker is absent. The defanged alternative was written
+    that way once and took 154 seconds on 200 kB; the assertion is on the clock, because the
+    output looks identical either way. A full performance guard follows in stage 6 - this one
+    exists now, while the class of bug is fresh.
+    """
+    body = ("QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVowMTIzNDU2Nzg5" * 4_000).encode()
+    raw = b.multipart("mixed", b.part("text/plain", body))
+
+    started = time.perf_counter()
+    found = dissect(client, raw)["messages"][0]["observables"]
+    elapsed = time.perf_counter() - started
+
+    assert found == []
+    assert elapsed < 5.0, f"took {elapsed:.1f}s on {len(body) / 1000:.0f} kB of base64"
