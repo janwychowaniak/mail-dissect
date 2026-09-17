@@ -191,6 +191,29 @@ the species `[D8]` keeps out of the registries.
 
 ---
 
+## F13 — the extension registry does not know the script extensions
+
+Measured against a 64-item probe of extensions that occur in mail, `mime-db@1.54.0` (1 239
+extensions) covers 49 and misses 15 — and the misses are almost exactly the script and
+executable formats:
+
+```
+missing: cmd scr pif vbs vbe jse wsf wsh hta ps1 psm1 reg accdb z tgz
+```
+
+Apache Tika's `tika-mimetypes.xml` (1 299 extensions, 414 of them not in mime-db) covers
+`cmd`, `vbs`, `accdb`, `z` and `tgz` of that list and misses the other ten. Neither registry
+knows `scr`, `pif`, `hta` or `ps1`, because none of them has a registered media type.
+
+The consequence under SPEC §11.2 is narrow but real: a filename **written in the body text**
+whose extension is in neither registry produces no `filename` candidate, and if its final
+label is not a public suffix either, it produces nothing at all — `payload.scr` is invisible
+in `observables[]`. Attachment filenames are unaffected: they are a fact in `attachments[]`,
+never a candidate (SPEC §11.2), so the gap only touches filenames the message talks about.
+
+This is a property of the registry, not a defect in the grammar. Closing it would mean adding
+a second registry, not a list of our own — which is a decision, not an implementation detail.
+
 ## Open, to be probed in stage 1 (needs the project's dependencies installed)
 
 - **Starlette multipart limits.** Whether a non-file `eml` part is capped and text-decoded

@@ -516,6 +516,13 @@ multi-label suffixes such as `example.co.uk`) and a **list of known file extensi
    (§17) and must not depend on who built the image.
 3. The registries keep their own licences, also when the project is under a different one.
 
+The extension registry knows only extensions with a registered media type, which leaves out
+the script formats (`scr`, `pif`, `hta`, `ps1`, `vbs`, …) — see F13. A filename written in the
+body text with one of those extensions therefore yields no `filename` candidate. Attachment
+filenames are unaffected, being a fact in `attachments[]` rather than a candidate (§11.2). The
+gap is a property of the registry, and closing it would mean adding a second registry rather
+than a list of our own, which §2 forbids.
+
 Matching against the public suffix list (exact rules, `*` wildcards, `!` exceptions) is
 implemented in this project rather than taken from a package: the available packages carry
 their own snapshot, which would fork the version string that `/v1/health` promises.
