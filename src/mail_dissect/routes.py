@@ -171,4 +171,5 @@ async def health(request: Request) -> HealthOut:
             public_suffix_list=versions.public_suffix_list,
             file_extensions=versions.file_extensions,
         ),
+        extra_file_extensions=list(app.state.registries.extra_extensions),
     )

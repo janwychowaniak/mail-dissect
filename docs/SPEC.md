@@ -516,12 +516,30 @@ multi-label suffixes such as `example.co.uk`) and a **list of known file extensi
    (§17) and must not depend on who built the image.
 3. The registries keep their own licences, also when the project is under a different one.
 
-The extension registry knows only extensions with a registered media type, which leaves out
-the script formats (`scr`, `pif`, `hta`, `ps1`, `vbs`, …) — see F13. A filename written in the
-body text with one of those extensions therefore yields no `filename` candidate. Attachment
-filenames are unaffected, being a fact in `attachments[]` rather than a candidate (§11.2). The
-gap is a property of the registry, and closing it would mean adding a second registry rather
-than a list of our own, which §2 forbids.
+The extension registry knows only extensions with a **registered media type**, which leaves
+out the script formats (`scr`, `pif`, `hta`, `ps1`, `vbs`, `wsf`, …) — see F13. A filename
+written in body text with one of those yields no `filename` candidate. Attachment filenames
+are unaffected, being a fact in `attachments[]` rather than a candidate (§11.2).
+
+A second registry would not close the gap: Apache Tika's globs add five of the fifteen
+formats measured and still miss `scr`, `hta` and `ps1`, because both registries are keyed by
+media type and these formats have none. Curating a list ourselves is worse: the selection
+criterion would slip from "documented format" to "risky format" at the first opportunity, and
+the service would start carrying somebody's point of view — precisely what §2 forbids.
+
+**So the mechanism is ours and the content is the deployment's** `[D22]`, the same shape as
+the unwrapper table (§10). `EXTRA_FILE_EXTENSIONS` adds extensions for one deployment;
+it is **empty by default** and **additive only** — it never removes anything from the
+registry. A supplied extension behaves like any other: one that is also a public suffix
+produces the `domain`/`filename` collision of §11.3 with `ambiguous: true`, with no special
+case. A value that is not extension-shaped stops the service at startup, because an entry
+that silently never matches reads as "this deployment added nothing".
+
+The configured value is **reported in `/v1/health`** — both as a list and folded into the
+registry version string as `+extra<count>/<digest>` — and it is an input to determinism
+(§17) on the same terms as the registry versions themselves: two deployments must not be able
+to report the same version while disagreeing about `payload.scr`. README carries examples to
+copy, never a default.
 
 Matching against the public suffix list (exact rules, `*` wildcards, `!` exceptions) is
 implemented in this project rather than taken from a package: the available packages carry
@@ -676,7 +694,7 @@ reported as a full one would be a silent failure.
 ### 14.3 `GET /v1/health`
 
 Returns `{ok, version, uptime_seconds, tools:{tika, renderer}, tools_checked_age_seconds,
-registries:{public_suffix_list, file_extensions}}` with status **200 whenever the service is
+registries:{public_suffix_list, file_extensions}, extra_file_extensions}` with status **200 whenever the service is
 alive** — including when the optional dependencies do not answer. A dead Tika is not a failure
 of this service, only a poorer mode of operation; if health depended on soft dependencies,
 every mechanism that restarts unhealthy containers would kill a working service for someone
@@ -808,8 +826,9 @@ the response status.
 ## 17. Determinism — the overriding criterion
 
 The same message, with the same limits, the same availability of optional dependencies and
-**the same registry versions** (§12), yields the same result, regardless of the moment and the
-order of calls. This includes **the order of elements in arrays**: `observables[]`, `links[]`,
+**the same registry versions — the extension supplement of `[D22]` included, which is why it
+is folded into the reported version** (§12) — yields the same result, regardless of the moment
+and the order of calls. This includes **the order of elements in arrays**: `observables[]`, `links[]`,
 `resources[]`, `attachments[]` and `artifacts[]` follow the order of occurrence in the
 material, not the order in which the implementation happened to find them.
 
@@ -928,6 +947,11 @@ Approved by the maintainer, 2026-09-17.
 - **[D21] Only the ICANN section of the public suffix list is loaded**, and the section is
   named in the version string, because which section is in use changes recognition and a
   version number alone does not reveal it (§12).
+- **[D22] The extension registry has a configurable, empty-by-default, additive supplement**
+  (`EXTRA_FILE_EXTENSIONS`). Both available registries are keyed by media type and so know
+  none of the script formats (F13); shipping our own list of them would make the service carry
+  a point of view. The mechanism is ours, the content is the deployment's — and because it
+  changes recognition, it is reported in `/v1/health` and folded into the registry version.
 
 **Delivery**
 

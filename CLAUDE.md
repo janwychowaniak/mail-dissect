@@ -59,6 +59,13 @@ The Dockerfile must stay buildable with the classic builder — no `RUN --mount`
 behaviour it describes and confirm the test goes red; a test that passes against a broken
 implementation is worse than no test, because it is counted as coverage.
 
+This is not a rule for acceptance tests only. **A test that cannot fail is green for a reason
+that has nothing to do with correctness**, and that happens most often in the assertions that
+look too small to be worth checking. `assert uptime_seconds >= 0` passed for months of nothing
+while the endpoint read a clock that shared no origin with the one it was comparing against;
+`assert uptime == 125` after advancing the clock by 125 could not. Prefer the assertion that
+names the expected value over the one that names a range.
+
 **Every fuzzer finding becomes a permanent test** with the offending bytes saved as a fixture
 `[D18]` — never a seed number in a log.
 

@@ -38,7 +38,7 @@ def create_app(
     """Build the app. `transport` and `clock` exist so tests need neither sockets nor sleep."""
     configure_logging()
     resolved = settings or Settings()
-    registries = Registries.load()
+    registries = Registries.load(extra_extensions=resolved.extra_file_extensions)
     store = ArtifactStore(
         Path(resolved.artifact_dir), ttl_seconds=resolved.artifact_ttl_seconds, clock=clock
     )
@@ -56,6 +56,7 @@ def create_app(
             public_suffix_list=registries.versions.public_suffix_list,
             file_extensions=registries.versions.file_extensions,
             extensions=registries.extension_count,
+            extra_extensions=list(registries.extra_extensions),
             tika=bool(resolved.tika_url),
             renderer=bool(resolved.screenshot_url),
         )

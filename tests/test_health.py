@@ -24,6 +24,7 @@ def test_health_reports_registry_versions_with_tools_disabled(client: TestClient
     assert body["registries"]["file_extensions"].startswith("mime-db@")
     assert body["uptime_seconds"] == 0
     assert body["version"]
+    assert body["extra_file_extensions"] == []  # [D22]: we ship no list of our own
 
 
 def test_uptime_is_measured_on_the_service_clock(client: TestClient, clock: FakeClock) -> None:
@@ -90,3 +91,14 @@ def test_timeout_is_not_down(settings: Settings, clock: FakeClock) -> None:
         body = client.get("/v1/health").json()
         assert body["tools"]["tika"] == "timeout"
         assert body["tools"]["renderer"] == "disabled"
+
+
+def test_the_extension_supplement_is_visible_in_health(
+    settings: Settings, clock: FakeClock
+) -> None:
+    """[D22]: the configuration changes recognition, so it belongs next to the versions."""
+    configured = settings.model_copy(update={"extra_file_extensions": ["scr", "hta"]})
+    with TestClient(create_app(configured, clock=clock)) as client:
+        body = client.get("/v1/health").json()
+    assert body["extra_file_extensions"] == ["hta", "scr"]
+    assert "+extra2/" in body["registries"]["file_extensions"]

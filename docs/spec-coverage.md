@@ -99,6 +99,7 @@ disagree, the specification is right and this file is stale.
 | 63 | nested original byte-for-byte, hash matching an independent computation | §13.2 | stage 2 |
 | 64 | transport-encoded nesting → a parsed message, `eml` after decoding | §6.2 | stage 2 |
 | 65 | part count far over the limit → `truncated` in scan time, no full tree | §15 | stage 2 |
+| 66 | `payload.scr` in body text → no candidate with an empty supplement, a `filename` candidate with `EXTRA_FILE_EXTENSIONS=scr` | §12, §11.2 | registry half: `test_registries::test_the_supplement_is_additive_and_changes_the_version`; observable half: stage 4 |
 
 ## Resilience
 

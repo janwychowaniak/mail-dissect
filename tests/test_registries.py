@@ -68,3 +68,39 @@ def test_a_registry_that_does_not_match_its_manifest_is_refused(tmp_path: Path) 
 
     with pytest.raises(RegistryError, match="does not match its manifest digest"):
         Registries.load(tmp_path)
+
+
+def test_the_supplement_is_additive_and_changes_the_version() -> None:
+    """[D22]: the deployment says which extensions exist in its world, we ship none.
+
+    The registry is keyed by media type, so `scr` and `hta` are absent from it (F13). A list
+    of "risky" extensions shipped by us would be our point of view, which SPEC §2 forbids —
+    so the mechanism is ours and the content is the deployment's, exactly like UNWRAPPERS.
+    """
+    plain = Registries.load()
+    assert not plain.is_known_extension("scr")
+    assert plain.extra_extensions == ()
+
+    supplemented = Registries.load(extra_extensions=["SCR", ".hta"])
+    assert supplemented.is_known_extension("scr")
+    assert supplemented.is_known_extension(".HTA")
+    assert supplemented.extra_extensions == ("hta", "scr")
+
+    # Nothing is removed: the supplement only ever adds.
+    assert supplemented.is_known_extension("pdf")
+    assert supplemented.extension_count == plain.extension_count + 2
+
+    # Determinism is promised for "the same registry versions" (SPEC §17), so two
+    # deployments must not report the same version while disagreeing about payload.scr.
+    assert supplemented.versions.file_extensions != plain.versions.file_extensions
+    assert supplemented.versions.file_extensions.startswith(plain.versions.file_extensions)
+    assert Registries.load(extra_extensions=["hta", "scr"]).versions.file_extensions == (
+        supplemented.versions.file_extensions
+    )
+
+
+def test_an_extension_already_in_the_registry_is_not_counted_twice() -> None:
+    plain = Registries.load()
+    same = Registries.load(extra_extensions=["pdf"])
+    assert same.extension_count == plain.extension_count
+    assert same.versions.file_extensions != plain.versions.file_extensions  # still configured

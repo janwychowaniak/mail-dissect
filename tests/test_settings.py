@@ -56,3 +56,38 @@ def test_limits_reject_nonsense(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MAX_MIME_PARTS", "0")
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("scr,hta,ps1", ["hta", "ps1", "scr"]),
+        (" .SCR , hta ", ["hta", "scr"]),
+        ('["scr","hta"]', ["hta", "scr"]),  # the form UNWRAPPERS uses, one line above
+        ("scr,scr", ["scr"]),
+        ("", []),
+    ],
+)
+def test_extra_file_extensions_parsing(
+    monkeypatch: pytest.MonkeyPatch, value: str, expected: list[str]
+) -> None:
+    """[D22]: both the comma form anyone types and the JSON form anyone assumes."""
+    monkeypatch.setenv("EXTRA_FILE_EXTENSIONS", value)
+    assert Settings(_env_file=None).extra_file_extensions == expected
+
+
+@pytest.mark.parametrize(
+    "value", ["not an extension!", '["scr"', "a,,b!!", "way-too-long-extension-name"]
+)
+def test_a_mistyped_extension_stops_the_service(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    """A typo that silently never matches reads as "this deployment added nothing"."""
+    monkeypatch.setenv("EXTRA_FILE_EXTENSIONS", value)
+    with pytest.raises((ValidationError, SettingsError)):
+        Settings(_env_file=None)
+
+
+def test_the_supplement_is_empty_by_default() -> None:
+    """The service ships no list of its own (SPEC §2)."""
+    assert Settings(_env_file=None).extra_file_extensions == []

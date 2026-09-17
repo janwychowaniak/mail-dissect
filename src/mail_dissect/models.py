@@ -206,6 +206,9 @@ class HealthOut(BaseModel):
     tools: ToolsOut
     tools_checked_age_seconds: int | None
     registries: RegistryVersionsOut
+    # What this deployment added to the extension registry [D22]. Reported because it
+    # changes what the same string is recognised as, so it belongs with the versions.
+    extra_file_extensions: list[str]
 
 
 def scrub_surrogates(value: str) -> tuple[str, bool]:
