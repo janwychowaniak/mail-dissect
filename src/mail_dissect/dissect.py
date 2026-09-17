@@ -11,6 +11,7 @@ import dataclasses
 
 from .artifacts import ArtifactStore
 from .decode import hash_bytes
+from .htmlscan import AnchorEvent, HtmlScan, ResourceEvent, scan_html
 from .message import ParsedMessage, dissect_messages
 from .mimetree import PartInfo
 from .models import (
@@ -21,13 +22,17 @@ from .models import (
     BodyOut,
     DissectResponse,
     Flag,
+    LinkOut,
     MessageOut,
     MimePartOut,
     ReceivedOut,
+    ResourceOut,
     SourceHashes,
     scrub_surrogates,
 )
 from .settings import Settings
+from .unwrap import Unwrapper
+from .urls import UrlParts, split
 
 _FLAG_ORDER: tuple[Flag, ...] = (
     "truncated",
@@ -45,6 +50,7 @@ class _Assembly:
         self._store = store
         self._dissect_id = dissect_id
         self._settings = settings
+        self.unwrapper = Unwrapper(settings.unwrappers)
         self.artifacts: list[ArtifactOut] = []
         self.flags: set[str] = set()
         self.scrubbed = False
@@ -119,7 +125,10 @@ def _build_message(parsed: ParsedMessage, assembly: _Assembly, settings: Setting
         "headers", header_block, message_index=index, filename=f"headers-{index}.txt"
     )
 
-    body = _build_body(parsed, assembly, settings)
+    scan = _scan_body_html(parsed)
+    cid_map = _cid_map(parsed)
+    body = _build_body(parsed, assembly, settings, scan)
+    links, resources = _build_addresses(scan, assembly, cid_map)
     return MessageOut(
         index=index,
         depth=parsed.depth,
@@ -157,6 +166,8 @@ def _build_message(parsed: ParsedMessage, assembly: _Assembly, settings: Setting
         ],
         body=body,
         mime_parts=[_build_part(info, assembly) for info in parsed.tree.parts],
+        links=links,
+        resources=resources,
         attachments=[
             _build_attachment(parsed.tree.parts[part_index], assembly, index)
             for part_index in parsed.tree.attachments
@@ -208,7 +219,73 @@ def _build_attachment(info: PartInfo, assembly: _Assembly, message_index: int) -
     )
 
 
-def _build_body(parsed: ParsedMessage, assembly: _Assembly, settings: Settings) -> BodyOut:
+def _scan_body_html(parsed: ParsedMessage) -> HtmlScan | None:
+    """One scan of the HTML body, shared by everything derived from it (SPEC §9)."""
+    index = parsed.tree.body_html_index
+    if index is None:
+        return None
+    info = parsed.tree.parts[index]
+    return scan_html(info.text.text) if info.text else None
+
+
+def _cid_map(parsed: ParsedMessage) -> dict[str, int]:
+    """`Content-ID` to part index, within THIS message only (RFC 2392, exact match)."""
+    mapping: dict[str, int] = {}
+    for info in parsed.tree.parts:
+        if info.content_id:
+            mapping.setdefault(info.content_id.strip().strip("<>"), info.index)
+    return mapping
+
+
+def _url_fields(href: str, assembly: _Assembly, cid_map: dict[str, int]) -> dict[str, object]:
+    """Unwrap first, then decompose: the fields describe the TARGET, not the wrapper (§10)."""
+    unwrapped = assembly.unwrapper.apply(href)
+    parts: UrlParts = split(unwrapped.href)
+    cid_part = None
+    if parts.scheme == "cid" and parts.path:
+        cid_part = cid_map.get(parts.path.strip().strip("<>"))
+    return {
+        "href": assembly.text(parts.href),
+        "scheme": parts.scheme,
+        "host": parts.host,
+        "port": parts.port,
+        "userinfo": assembly.text(parts.userinfo) if parts.userinfo else None,
+        "path": assembly.text(parts.path) if parts.path else None,
+        "query": assembly.text(parts.query) if parts.query else None,
+        "fragment": assembly.text(parts.fragment) if parts.fragment else None,
+        "host_idn": parts.host_idn,
+        "host_punycode": parts.host_punycode,
+        "rewritten_from": assembly.text(unwrapped.rewritten_from)
+        if unwrapped.rewritten_from
+        else None,
+        "unwrap_failed": unwrapped.failed,
+        "cid_part": cid_part,
+    }
+
+
+def _build_addresses(
+    scan: HtmlScan | None, assembly: _Assembly, cid_map: dict[str, int]
+) -> tuple[list[LinkOut], list[ResourceOut]]:
+    """Anchors and auto-loaded resources, in document order, as two disjoint lists (§9.1)."""
+    links: list[LinkOut] = []
+    resources: list[ResourceOut] = []
+    if scan is None:
+        return links, resources
+    for event in scan.events:
+        if isinstance(event, AnchorEvent):
+            fields = _url_fields(event.href, assembly, cid_map)
+            links.append(
+                LinkOut(text=assembly.text(event.text) if event.text else None, **fields)  # type: ignore[arg-type]
+            )
+        elif isinstance(event, ResourceEvent):
+            fields = _url_fields(event.href, assembly, cid_map)
+            resources.append(ResourceOut(element=event.element, **fields))  # type: ignore[arg-type]
+    return links, resources
+
+
+def _build_body(
+    parsed: ParsedMessage, assembly: _Assembly, settings: Settings, scan: HtmlScan | None = None
+) -> BodyOut:
     """Each representation has its own threshold and its own link (SPEC §8, [D4])."""
     body = BodyOut(
         text_part_index=parsed.tree.body_text_index,
@@ -237,4 +314,21 @@ def _build_body(parsed: ParsedMessage, assembly: _Assembly, settings: Settings) 
         # failed, in which case a large response beats losing the content (SPEC §8).
         if len(encoded) <= settings.max_inline_body_bytes or artifact_id is None:
             setattr(body, attribute, content)
+
+    if scan is not None:
+        # [D4]: the text derived from HTML is a representation like the other two, with its
+        # own threshold and its own link. A consumer cannot reproduce it from the body_html
+        # artifact, because the conversion is a rule of this service, not their job.
+        derived = assembly.text(scan.text())
+        encoded = derived.encode("utf-8")
+        artifact_id = assembly.store_artifact(
+            "body_text_from_html",
+            encoded,
+            message_index=parsed.index,
+            part_index=parsed.tree.body_html_index,
+            filename=f"{parsed.index}-body-from-html.txt",
+        )
+        body.text_from_html_artifact_id = artifact_id
+        if len(encoded) <= settings.max_inline_body_bytes or artifact_id is None:
+            body.text_from_html = derived
     return body

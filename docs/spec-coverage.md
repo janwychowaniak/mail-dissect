@@ -44,9 +44,9 @@ line saying where it came from.
 | 2 | `multipart/alternative` with HTML and text | §6.3 | `test_mime::test_alternative_with_html_and_text` |
 | 3 | nested `message/rfc822` carries the original, not the envelope | §6.2 | `test_mime::test_nested_message_is_the_original` |
 | 4 | two nestings in one message, and a two-level nesting | §6.2 | `test_mime::test_two_nestings_and_a_two_level_nesting` |
-| 5 | long URL broken by `quoted-printable` is recovered whole | §7.2 | stage 3 |
-| 6 | link rewritten by a reversible wrapper | §10 | stage 3 |
-| 7 | link rewritten by a wrapper outside the table — unchanged, no network call | §10 | stage 3 |
+| 5 | long URL broken by `quoted-printable` is recovered whole | §7.2 | `test_html::test_long_url_broken_by_quoted_printable_is_recovered_whole` |
+| 6 | link rewritten by a reversible wrapper | §10 | `test_html::test_reversible_wrapper` |
+| 7 | link rewritten by a wrapper outside the table — unchanged, no network call | §10 | `test_html::test_wrapper_outside_the_table_passes_through` |
 | 8 | RFC 2047 headers and an 8-bit body disagreeing with its declaration | §7, §7.2 | `test_mime::test_encoded_headers_and_eight_bit_body` |
 | 9 | damaged MIME → `malformed_mime` plus a partial result | §15 | `test_mime::test_damaged_mime_is_normal_input` |
 | 10 | oversized attachment → `truncated`, rest of the dissection complete | §15 | `test_mime::test_oversized_attachment` |
@@ -60,9 +60,9 @@ line saying where it came from.
 | 18 | request for an artifact listing → 404, never an enumeration | §4 | `test_artifacts::test_no_listing_endpoint` |
 | 19 | artifact after a restart → `ARTIFACT_NOT_FOUND` (404) | §13.4 | `test_artifacts::test_artifact_from_a_previous_process_life_is_404` |
 | 20 | the same input through both channels → identical results | §4 | `test_intake::test_both_channels_give_identical_results` |
-| 21 | `mailto:` anchor and `cid:` resource → both present, `host: null`, `cid_part` set | §9.1 | stage 3 |
-| 22 | remote image and an anchor with the same address → both lists, one observable | §11 | stage 4 |
-| 23 | URL with `userinfo` → `host` and `userinfo` split correctly | §9.1 | stage 3 |
+| 21 | `mailto:` anchor and `cid:` resource → both present, `host: null`, `cid_part` set | §9.1 | `test_html::test_mailto_anchor_and_cid_resource` |
+| 22 | remote image and an anchor with the same address → both lists, one observable | §11 | `test_html::test_same_address_as_anchor_and_as_resource` (observable half: stage 4) |
+| 23 | URL with `userinfo` → `host` and `userinfo` split correctly | §9.1 | `test_html::test_url_with_userinfo` |
 | 24 | the same address five times → one entry, `occurrences: 5`, complete `sources[]` | §11.3 | stage 4 |
 | 25 | defanged address → `value` re-armed, `value_raw` original, `defanged: true` | §11.3 | stage 4 |
 | 26 | `raport.zip` → two candidates; `faktura.pdf` → only `filename` | §11.3 | stage 4 |
@@ -77,10 +77,10 @@ line saying where it came from.
 | 35 | email address in content → `email` plus its domain as `domain` | §11.2 | stage 4 |
 | 36 | `/v1/health` → 200 with dependencies off, all fields, registry versions | §14.3, §12 | `test_health::test_health_reports_registry_versions_with_tools_disabled` |
 | 37 | `multipart/mixed` with two `text/plain` → first is the body | §6.3 | `test_mime::test_mixed_with_two_text_parts` |
-| 38 | `multipart/related` with `alternative` inside and a `cid:` image | §6.3, §9.1 | stage 3 |
+| 38 | `multipart/related` with `alternative` inside and a `cid:` image | §6.3, §9.1 | `test_html::test_related_with_alternative_inside` |
 | 39 | two attachments with identical names → distinct `part_index` | §5.2 | `test_mime::test_two_attachments_with_the_same_name` |
-| 40 | wrapper inside a wrapper → unwrapped to a fixed point | §10 | stage 3 |
-| 41 | entry matches but the target cannot be extracted → `unwrap_failed: true` | §10 | stage 3 |
+| 40 | wrapper inside a wrapper → unwrapped to a fixed point | §10 | `test_html::test_wrapper_inside_a_wrapper` |
+| 41 | entry matches but the target cannot be extracted → `unwrap_failed: true` | §10 | `test_html::test_matching_entry_that_cannot_unwrap` |
 | 42 | malformed `UNWRAPPERS` → the service does not start | §10, §19 | `test_settings::test_malformed_unwrappers_stop_the_service` |
 | 43 | address decomposition across `From`, `To`, `Reply-To` | §7 | `test_mime::test_address_decomposition` |
 | 44 | three-hop `Received` chain, `null` where the header was incomplete | §7 | `test_mime::test_received_chain` |
@@ -88,8 +88,8 @@ line saying where it came from.
 | 46 | `headers` completeness: custom and repeated headers | §7 | `test_intake::test_headers_are_complete_and_ordered` |
 | 47 | declared type ≠ detected type, with no comment from the service | §7.1 | `test_mime::test_declared_type_differs_from_detected` |
 | 48 | `charset_declared` ≠ `charset_used`, `encoding_fallback`, content readable | §7.2 | `test_mime::test_declared_charset_differs_from_used` + `test_decode::test_the_ladder` |
-| 49 | `text_from_html` with and without a `text/plain` part | §9.3 | stage 3 |
-| 50 | inline threshold for `html` and for `text_from_html` | §8 | stage 3 |
+| 49 | `text_from_html` with and without a `text/plain` part | §9.3 | `test_html::test_text_from_html` |
+| 50 | inline threshold for `html` and for `text_from_html` | §8 | `test_html::test_inline_threshold_per_representation` |
 | 51 | all three hashes for the message and every attachment | §13.2 | `test_mime::test_all_three_hashes_match_an_independent_computation` |
 | 52 | working Tika → `attachment_text`, candidates with an `attachment` source | §14.1 | stage 5 |
 | 53 | working renderer → `screenshot` artifact with `message_index` | §14.2 | stage 5 |
@@ -99,7 +99,7 @@ line saying where it came from.
 | 57 | artifact response headers: octet-stream, sanitised filename, nosniff | §13.3 | `test_mime::test_attachment_filename_is_sanitised_in_the_response_header` |
 | 58 | mixed tool outcome → worst wins (`timeout`), per-item links still correct | §14 | stage 5 |
 | 59 | nested message screenshot → two `screenshot` artifacts | §13.1, §14.2 | stage 5 |
-| 60 | rewritten resource → target in `href`, `rewritten_from`, `unwrap_failed` on failure | §10 | stage 3 |
+| 60 | rewritten resource → target in `href`, `rewritten_from`, `unwrap_failed` on failure | §10 | `test_html::test_rewritten_resource` |
 | 61 | health and dependencies: `disabled` with no traffic, `down`, one probe per TTL | §14.3 | `test_health::test_disabled_tools_are_never_probed`, `…_unreachable_tools_are_down…` |
 | 62 | stable core of `observables[]` with and without document extraction | §11.1 | stage 5 |
 | 63 | nested original byte-for-byte, hash matching an independent computation | §13.2 | `test_mime::test_nested_original_is_byte_identical` |
