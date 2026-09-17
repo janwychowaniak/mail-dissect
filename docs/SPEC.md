@@ -779,17 +779,36 @@ at all (F1b). Reading that as "no headers" would be right by accident here and w
 genuine mbox export, which legitimately opens with an envelope line followed by real headers.
 
 **Damaged MIME is normal input**, not an exception: flag `malformed_mime`, dissect what can be
-dissected. The standard library is nearly silent about damage (F8), so both `malformed_mime`
+dissected. The flag marks what **failed**, never what merely looks unappetising `[D23]`: a
+message with one header and a binary body parses without a single fault and does not get it.
+A flag that also fires on healthy material stops meaning anything — the consumer learns to
+ignore it, and then it is missing for the case it exists for. The standard library is nearly silent about damage (F8), so both `malformed_mime`
 and `attachment_unreadable` are defined by this service: the former when the raw header
 disagrees with what was parsed or the structure does not close; the latter when the decoder
 reports that the byte stream cannot be reconstructed faithfully.
 
 **An oversized attachment and a damaged attachment are two different events** with two
 different flags. Oversized: the material was healthy, the service chose not to go further — an
-entry in `attachments[]` with no artifact (`artifact_id: null`) but **with hashes computed in a
-single streaming pass**, and the flag `truncated`. The consumer gets the means to check a file
-the service does not serve. Damaged: the bytes cannot be read, so the hashes are `null`, both
-ids are `null`, and the flag is `attachment_unreadable`.
+entry in `attachments[]` with no artifact (`artifact_id: null`) but **with all three hashes**,
+and the flag `truncated`. The consumer gets the means to check a file the service does not
+serve. Damaged: the bytes cannot be read, so the hashes are `null`, both ids are `null`, and
+the flag is `attachment_unreadable`.
+
+**What that costs in memory, stated plainly.** The hashes are computed in one pass over the
+decoded bytes and the bytes are then dropped, but the service is **not** `O(1)` in memory and
+sizing a container as though it were will get it killed. The whole input is held at once — the
+`UNPARSABLE` gate and the `source` hashes both need it — and a decoded attachment is held
+while it is hashed and written. Peak memory for **one request** is therefore on the order of
+
+> `MAX_MESSAGE_BYTES` (the input) + the parser's own representation of it + the encoded span
+> of the largest part + `MAX_ATTACHMENT_BYTES` (its decoded form)
+
+**Measured at the default limits: 452 MB peak RSS** for a 47 MB message carrying a 24 MB
+attachment, in a process whose interpreter and imports account for 43 MB of that. The largest
+single contributor is the standard library's own representation of the message, not our
+copies. **Concurrent requests multiply this figure** — the service is single-process and does
+not queue, so two dissections of that size at once want roughly twice the memory. Size the
+container from the limits you actually configure, not from the typical message.
 
 **Strings that cannot be serialised are scrubbed, and the scrubbing is reported.** One 8-bit
 byte in a header can produce a lone surrogate that makes the JSON response raise inside the
@@ -947,6 +966,10 @@ Approved by the maintainer, 2026-09-17.
 - **[D21] Only the ICANN section of the public suffix list is loaded**, and the section is
   named in the version string, because which section is in use changes recognition and a
   version number alone does not reveal it (§12).
+- **[D23] A flag describes a failure, not an appearance.** `malformed_mime` is raised from
+  what actually failed to parse — the parser's own defects, or our view of the bytes
+  disagreeing with its view of the tree — and never from material that is merely binary or
+  unusual. A flag that fires on healthy input teaches consumers to ignore it.
 - **[D22] The extension registry has a configurable, empty-by-default, additive supplement**
   (`EXTRA_FILE_EXTENSIONS`). Both available registries are keyed by media type and so know
   none of the script formats (F13); shipping our own list of them would make the service carry

@@ -66,6 +66,22 @@ while the endpoint read a clock that shared no origin with the one it was compar
 `assert uptime == 125` after advancing the clock by 125 could not. Prefer the assertion that
 names the expected value over the one that names a range.
 
+**Mutation is a ritual of every stage, not a gesture.** Before a stage is pushed, pick its
+load-bearing behaviours, break each one in the source on purpose, and check that the tests
+that describe it go red. The four mutations run at the end of stage 2 found two tests that
+proved nothing — and one of them was hiding a behaviour that did not exist: the pre-parse cut
+of `[D13]` was written and never wired in, so CI had been confirming it for a whole stage.
+
+**Two traps that will come back:**
+
+- **A byte-fidelity fixture must be deliberately non-canonical** — a refolded header, a
+  `From:` with no space after the colon, LF instead of CRLF. A canonical message survives a
+  rebuild unchanged (F1), so a canonical fixture proves only that two equal strings are
+  equal, and it passes against an implementation that reassembles rather than reads.
+- **A timing assertion must be far from both paths' real cost.** `elapsed < 2.0` could not
+  tell a pre-parse cut from a full parse of 20 000 parts; at 100 000 parts the two are ~70x
+  apart and the same assertion means something.
+
 **Every fuzzer finding becomes a permanent test** with the offending bytes saved as a fixture
 `[D18]` — never a seed number in a log.
 

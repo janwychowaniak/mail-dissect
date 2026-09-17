@@ -9,6 +9,12 @@ The `Test` column is filled in as the implementation stages land; `stage N` mark
 test does not exist yet. `SPEC.md` is the authority — where this map and the specification
 disagree, the specification is right and this file is stale.
 
+**Case numbering is a shared language for reporting defects, so numbers never shift.** Cases
+1–65 are the acceptance set as specified. **Case 66 was added here**, after the measurement
+recorded as F13 showed that the extension registry knows none of the script formats; it
+covers the supplement introduced by `[D22]`. Any further case gets the next free number and a
+line saying where it came from.
+
 ## Functional requirements
 
 | # | Requirement | SPEC.md |
@@ -63,7 +69,7 @@ disagree, the specification is right and this file is stale.
 | 27 | IDN host in uppercase → punycode and lowercase in `value`, path untouched | §11.3 | stage 4 |
 | 28 | private address `10.0.0.5` → present, not filtered | §11.3 | stage 4 |
 | 29 | a binary file sent as a message → `UNPARSABLE` (422) | §15, §16 | `test_intake::test_binary_file_is_unparsable` |
-| 30 | one valid header and garbage after it → 200 with `malformed_mime` | §15 | `test_intake::test_one_header_and_garbage_is_accepted` (+ `…binary_body_is_not_damage`) |
+| 30 | one valid header, then garbage **instead of further headers** → 200 with `malformed_mime`; a binary body alone is not damage `[D23]` | §15 | `test_intake::test_one_header_and_garbage_is_accepted` (+ `…binary_body_is_not_damage`) |
 | 31 | artifact write impossible → success, `artifact_id: null`, `artifact_store_failed` | §13.4, §8 | `test_artifacts::test_failed_artifact_write_still_dissects` |
 | 32 | `README.md`/`raport.zip` ambiguous; `faktura.pdf`/`example.com` not | §11.3 | stage 4 |
 | 33 | `wersja.1.2` → no `domain` candidate | §11.2 | `test_registries::test_public_suffix` (registry half; observable half stage 4) |

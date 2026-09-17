@@ -59,10 +59,11 @@ def part(
         items.append((name, value))
 
     if encoding == "base64":
-        encoded = CRLF.join(
-            base64.b64encode(payload)[i : i + 76]
-            for i in range(0, len(base64.b64encode(payload)), 76)
-        )
+        # Encode once, then fold. Calling b64encode inside the comprehension re-encodes the
+        # whole payload for every 76-byte line, which is unnoticeable on a fixture of a few
+        # bytes and takes minutes on one of a few megabytes.
+        blob = base64.b64encode(payload)
+        encoded = CRLF.join(blob[i : i + 76] for i in range(0, len(blob), 76))
     elif encoding == "quoted-printable":
         encoded = quopri.encodestring(payload)
     else:

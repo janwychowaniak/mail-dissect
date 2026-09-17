@@ -31,6 +31,7 @@ _BOMS: tuple[tuple[bytes, str], ...] = (
     (codecs.BOM_UTF16_BE, "utf-16-be"),
 )
 _META_SNIFF_BYTES = 4096
+_BASE64_WHITESPACE = b" \t\r\n\x0b\x0c"
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,7 +76,9 @@ def decode_transfer(payload: bytes, encoding: str | None) -> tuple[bytes | None,
     if name in ("7bit", "8bit", "binary", ""):
         return payload, False
     if name == "base64":
-        stripped = bytes(c for c in payload if not chr(c).isspace())
+        # translate() strips at C speed; the obvious per-byte comprehension is ~50x slower
+        # and turns a 25 MB attachment into seconds of the dissection budget for nothing.
+        stripped = payload.translate(None, _BASE64_WHITESPACE)
         if not stripped:
             return b"", bool(payload.strip())
         if len(stripped.rstrip(b"=")) % 4 == 1:
