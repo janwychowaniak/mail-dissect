@@ -61,8 +61,9 @@ implementation is worse than no test, because it is counted as coverage.
 
 **One rule, because the forms keep changing.** Every failure of this discipline so far has
 been the same thing wearing a different coat: **the test was green for a reason that has
-nothing to do with the behaviour it describes.** Three forms have already turned up, and the
-fourth will not look like any of them — which is why the rule is worth more than the list:
+nothing to do with the behaviour it describes.** Five forms have turned up so far, in tests and
+in measurements alike, and the sixth will not look like any of them — which is why the rule is
+worth more than the list:
 
 - **An assertion that cannot fail.** `assert uptime_seconds >= 0` passed for months of
   nothing while the endpoint read a clock that shared no origin with the one it compared
@@ -74,6 +75,14 @@ fourth will not look like any of them — which is why the rule is worth more th
   dissection cut short and by one that ran to completion past its budget, so asserting the
   flag proved nothing about the deadline being checked *between* units of work. The assertion
   had to be that the result is genuinely shorter than the material.
+- **A measurement with no positive control.** "Zero requests reached the listener" was
+  measured once against a listener the container could not reach at all; the zero was true and
+  meant nothing. **A positive control is to a measurement what a mutation is to a test** —
+  the same apparatus, the same path, with the thing you are looking for deliberately present.
+- **A silenced error on the step the experiment depends on.** A preparation step whose failure
+  is hidden by `2>/dev/null` and an ignored exit status is the same thing as an assertion that
+  cannot fail: a `docker rmi` that quietly failed turned the next step into a no-op, and the
+  no-op read as a result (F16). Check between steps that the preparation actually happened.
 
 **Mutation is a ritual of every stage, not a gesture.** Before a stage is pushed, pick its
 load-bearing behaviours, break each one in the source on purpose, and check that the tests

@@ -304,13 +304,22 @@ store, not the containerd snapshotter — the distinction matters for the last r
 cannot do. The failure appears only on the machine that cannot reach a registry, which is the
 worst place to discover it.
 
-**`RepoDigests` did not survive the round trip here**, for an image that had been pulled from
-a registry. The control matters: the image was removed before loading, because a `load` over
-an ID that is already present is a no-op and leaves the existing metadata in place — which is
-the most likely way to measure this and conclude the opposite. Whether the containerd image
-store behaves differently is untested. Either way the practical answer does not depend on it:
-compare the **checksum of the archive** on both sides, since that is the artifact both sides
-actually hold.
+**`RepoDigests` does not survive the round trip**, for an image that had been pulled from a
+registry. Measured twice and independently — here on `ghcr.io/janwychowaniak/mail-dissect`,
+and separately by the maintainer on a freshly pulled `busybox:1.37` — with the same result on
+the same engine and store.
+
+The control is the whole finding. A `load` over an image that is still present is a no-op and
+leaves the existing metadata in place, so the measurement reads as "the digest survived" while
+nothing has happened at all. The first attempt at this measurement produced exactly that false
+positive, and its cause is worth naming: the `docker rmi` in the preparation step **failed**,
+because two stopped containers still referenced the image, and its error was silenced and its
+exit status ignored. Verify between steps that the removal actually removed something
+(`docker image inspect` must fail) before trusting the result.
+
+Whether the containerd image store behaves differently is untested. The practical answer does
+not depend on it: compare the **checksum of the archive** on both sides, since that is the
+artifact both sides actually hold.
 
 ## Open, to be probed in stage 1 (needs the project's dependencies installed)
 

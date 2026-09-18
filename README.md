@@ -307,11 +307,13 @@ docker image inspect ghcr.io/janwychowaniak/mail-dissect:0.1.0 --format '{{.Repo
 untagged image is invisible to `docker compose`, which then tries to pull it and fails — the
 one failure mode that only appears on the host that cannot pull. Saving by tag preserves it.
 
-Do not plan on checking the digest after a manual transfer: it is a property of the pull, and
-whether it survives `save`/`load` depends on the engine's image store. Measured on Docker
-29.1.3 with the `overlay2` store, with the image removed before loading so the load was real
-rather than a no-op, `RepoDigests` came back **empty** while `RepoTags` was preserved. The
-checksum of the archive is the thing that exists on both sides either way. The one in `compose.yml` is deliberate —
+**The digest does not survive the transfer** — it is a property of the pull. Measured twice,
+independently, on Docker 29.1.3 with the `overlay2` image store: `RepoDigests` comes back
+**empty** after `load` while `RepoTags` is preserved. Both measurements had to remove the
+image first, because a `load` over an image that is still present is a no-op that leaves the
+old metadata in place and reads as "the digest survived". Whether the containerd image store
+behaves differently is untested. Compare the checksum of the archive instead — it is the
+artifact both sides actually hold. The one in `compose.yml` is deliberate —
 `--chromium-allow-list=^file:///.*` rather than a deny-list of everything, because Gotenberg
 renders the uploaded page from a `file:///` URL of its own and denying `.*` denies that too,
 turning every render into a `403`.
