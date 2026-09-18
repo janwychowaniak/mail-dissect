@@ -289,6 +289,29 @@ Two smaller observations: Gotenberg's own Chromium reaches for `accounts.google.
 a tag we had pinned, `gotenberg/gotenberg:8.24.2`, does not exist at all — it was written from
 memory, and pulling it is what proved that.
 
+## F16 — moving images to a host that cannot pull
+
+Probed **2026-09-18** on Docker **29.1.3**, storage driver **overlay2** (the classic image
+store, not the containerd snapshotter — the distinction matters for the last row).
+
+| Saved as | After `docker load` |
+| --- | --- |
+| `docker save <image id>` | `RepoTags=[]`, `RepoDigests=[]` |
+| `docker save <repo:tag>` | `RepoTags=[repo:tag]`, `RepoDigests=[]` |
+
+**An archive saved by image ID loads with no tags**, and an untagged image is invisible to
+`docker compose`: it falls through to a registry pull, which is exactly what the target host
+cannot do. The failure appears only on the machine that cannot reach a registry, which is the
+worst place to discover it.
+
+**`RepoDigests` did not survive the round trip here**, for an image that had been pulled from
+a registry. The control matters: the image was removed before loading, because a `load` over
+an ID that is already present is a no-op and leaves the existing metadata in place — which is
+the most likely way to measure this and conclude the opposite. Whether the containerd image
+store behaves differently is untested. Either way the practical answer does not depend on it:
+compare the **checksum of the archive** on both sides, since that is the artifact both sides
+actually hold.
+
 ## Open, to be probed in stage 1 (needs the project's dependencies installed)
 
 - **Starlette multipart limits.** Whether a non-file `eml` part is capped and text-decoded
