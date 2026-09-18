@@ -224,24 +224,50 @@ extension. Measured against the shipped snapshots:
 `mov`, `md`, `sh`, `xyz`, `ai`, `me`, `cc` and `pl`. `net`, `info`, `io`, `dev` and `app` do
 not collide.
 
-Measured again over a corpus of **70 real messages** (101 counting nested ones), on a
-deployment configured for its own environment:
+Every `.com` and `.org` domain in a message therefore carries a `filename` twin, both
+flagged. Those are the two commonest domains in mail, so this is the ordinary case rather than
+a corner one — the `raport.zip` example that the rule is usually explained with is the rarer
+half of it.
 
-| | |
-| --- | --- |
-| `filename` candidates | 485 |
-| of those, produced by the collision | **483** |
-| genuinely unambiguous filenames | 2, both `.pdf` |
-| occurrences with the extension `com` | 938 |
-| occurrences with the extension `pl` (a Perl script) | 21 |
-| messages affected | **all 70** |
+So a consumer reading `observables[]` without filtering on `ambiguous` sees close to twice
+the list they expected and will read it as a defect. It is not: the rule is working, and
+subtracting these extensions from the registry would be a worse cure than the disease — `com`
+really is an executable extension (`command.com`) and `pl` really is a Perl script, so
+removing them blinds the channel exactly where it earns its place. The flag is the answer, and
+dropping one side of a collision costs the consumer a single condition.
 
-So a consumer reading `observables[]` without filtering on `ambiguous` sees roughly twice
-the list they expected, in every message, and will read it as a defect. It is not: the rule
-is working, and subtracting these extensions from the registry would be a worse cure than the
-disease — `com` really is an executable extension (`command.com`) and `pl` really is a Perl
-script, so removing them blinds the channel exactly where it earns its place. The flag is the
-answer, and dropping one side of a collision costs the consumer a single condition.
+## F15 — the two tools, verified against real images rather than assumed
+
+Probed **2026-09-18** against `apache/tika:3.2.3.0` and `gotenberg/gotenberg:8.37.0`, the
+versions pinned in `compose.yml`.
+
+**Tika's contract is exactly what the specification says.** `PUT /tika` with the raw bytes,
+`Accept: text/plain` and the attachment's `Content-Type` returns the extracted text as the
+body. A 617-byte hand-built PDF carrying one line came back with that line, verbatim.
+
+**Gotenberg's screenshot route works — but the hardening flag we recommended breaks it.**
+`POST /forms/chromium/screenshot/html` with an `index.html` file part returns `image/png`.
+With `--chromium-deny-list=.*`, however, every render returns **403 Forbidden**:
+
+```
+HTML screenshot: screenshot: filter URL:
+'file:///tmp/…/….html' matches the expression from the denied list
+```
+
+Gotenberg renders the uploaded page from a `file:///` URL of its own, so a deny-list that
+covers everything covers that too. The working form is an allow-list instead:
+
+```
+--chromium-allow-list=^file:///.*
+```
+
+which permits the page being rendered and nothing else — `200`, `image/png`. Its RE2 engine
+has no lookahead, so "deny everything except file://" cannot be written as a deny-list.
+
+Two smaller observations: Gotenberg's own Chromium reaches for `accounts.google.com` and
+`optimizationguide-pa.googleapis.com` at startup, blocked by its internal pinning proxy and
+by a network with no route out; and a tag we had pinned, `gotenberg/gotenberg:8.24.2`, does
+not exist at all — it was written from memory, and pulling it is what proved that.
 
 ## Open, to be probed in stage 1 (needs the project's dependencies installed)
 

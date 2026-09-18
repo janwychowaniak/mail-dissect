@@ -492,11 +492,11 @@ from URLs by a fixed rule: strip trailing `.,;:!?"'`, then strip unbalanced `)]}
   `filename` candidate beside it, both flagged. `net`, `info`, `io`, `dev` and `app` do not
   collide. This is the rule working rather than failing — two registries genuinely claim the
   string, and the flag is what lets a consumer drop one side with a single condition — but it
-  is a larger share of ordinary mail than the `raport.zip` example suggests. **Expect the
-  collision in every message, not in corner cases:** over a corpus of 70 real messages, 483
-  of 485 `filename` candidates were collision twins and every message was affected (F14). A
-  consumer reading `observables[]` without filtering on `ambiguous` will see a list about
-  twice the length they expected, and should not read that as a defect. **The flag concerns this collision
+  is a larger share of ordinary mail than the `raport.zip` example suggests: `com` and `org`
+  are the two commonest domains there are, so **the collision is the ordinary case, not a
+  corner one** (F14). A consumer reading `observables[]` without filtering on `ambiguous`
+  will see a list close to twice the length they expected, and should not read that as a
+  defect. **The flag concerns this collision
   only** and does not mean "careful, this might be a coincidence": a version number that looks
   like an IP address, or an identifier that looks like a hash, are recognised without
   reservation, because grammatically that is what they are.
@@ -827,8 +827,16 @@ while it is hashed and written. Peak memory for **one request** is therefore on 
 attachment, in a process whose interpreter and imports account for 43 MB of that. The largest
 single contributor is the standard library's own representation of the message, not our
 copies. **Concurrent requests multiply this figure** — the service is single-process and does
-not queue, so two dissections of that size at once want roughly twice the memory. Size the
-container from the limits you actually configure, not from the typical message.
+not queue, so two dissections of that size at once want roughly twice the memory.
+
+**The third factor is the tool fan-out.** Calls to the optional tools run concurrently, up to
+**`MAX_TOOL_CONCURRENCY` = 4**, and each in-flight call holds the attachment it is sending.
+This is a constant in the code rather than a variable: the configuration surface of §19 is
+closed, and a parameter nobody asked for is worse than its absence. It is named here because a
+deployment sizing a container needs all three factors — input size, concurrent requests, and
+concurrent tool calls — and cannot derive the third from anywhere else.
+
+Size the container from the limits you actually configure, not from the typical message.
 
 **Strings that cannot be serialised are scrubbed, and the scrubbing is reported.** One 8-bit
 byte in a header can produce a lone surrogate that makes the JSON response raise inside the

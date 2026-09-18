@@ -100,3 +100,35 @@ def simple_text(text: str = "hello world") -> bytes:
         {"From": "sender@example.com", "To": "rcpt@example.com", "Subject": "hello"},
         body=text.encode(),
     )
+
+
+def minimal_pdf(text: str) -> bytes:
+    """A valid one-page PDF carrying one line of text.
+
+    Hand-built rather than checked in: a fixture the tests can read is worth more than an
+    opaque blob, and this one is small enough to follow. Used by the live-tool test, where
+    the extractor has to find real text in a real document.
+    """
+    stream = f"BT /F1 12 Tf 72 720 Td ({text}) Tj ET".encode()
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
+        b"/Resources << /Font << /F1 5 0 R >> >> >>",
+        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    pdf = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for index, body in enumerate(objects, start=1):
+        offsets.append(len(pdf))
+        pdf += f"{index} 0 obj\n".encode() + body + b"\nendobj\n"
+    table = len(pdf)
+    pdf += f"xref\n0 {len(objects) + 1}\n".encode() + b"0000000000 65535 f \n"
+    for offset in offsets:
+        pdf += f"{offset:010d} 00000 n \n".encode()
+    pdf += (
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
+        f"startxref\n{table}\n%%EOF\n"
+    ).encode()
+    return bytes(pdf)

@@ -59,26 +59,30 @@ The Dockerfile must stay buildable with the classic builder — no `RUN --mount`
 behaviour it describes and confirm the test goes red; a test that passes against a broken
 implementation is worse than no test, because it is counted as coverage.
 
-This is not a rule for acceptance tests only. **A test that cannot fail is green for a reason
-that has nothing to do with correctness**, and that happens most often in the assertions that
-look too small to be worth checking. `assert uptime_seconds >= 0` passed for months of nothing
-while the endpoint read a clock that shared no origin with the one it was comparing against;
-`assert uptime == 125` after advancing the clock by 125 could not. Prefer the assertion that
-names the expected value over the one that names a range.
+**One rule, because the forms keep changing.** Every failure of this discipline so far has
+been the same thing wearing a different coat: **the test was green for a reason that has
+nothing to do with the behaviour it describes.** Three forms have already turned up, and the
+fourth will not look like any of them — which is why the rule is worth more than the list:
+
+- **An assertion that cannot fail.** `assert uptime_seconds >= 0` passed for months of
+  nothing while the endpoint read a clock that shared no origin with the one it compared
+  against. `assert uptime == 125` after advancing the clock by 125 could not.
+- **A mutation that never applied.** A search string that no longer matches the source — a
+  comment reworded, a line reformatted — leaves the code untouched and the suite green, which
+  is indistinguishable from a test that cannot fail. Mutation scripts must assert the match.
+- **A flag asserted in place of the property it describes.** `truncated` is set both by a
+  dissection cut short and by one that ran to completion past its budget, so asserting the
+  flag proved nothing about the deadline being checked *between* units of work. The assertion
+  had to be that the result is genuinely shorter than the material.
 
 **Mutation is a ritual of every stage, not a gesture.** Before a stage is pushed, pick its
 load-bearing behaviours, break each one in the source on purpose, and check that the tests
-that describe it go red. The four mutations run at the end of stage 2 found two tests that
-proved nothing — and one of them was hiding a behaviour that did not exist: the pre-parse cut
-of `[D13]` was written and never wired in, so CI had been confirming it for a whole stage.
+that describe it go red — and that the break actually landed. The four mutations at the end of
+stage 2 found two tests that proved nothing, one of them hiding a behaviour that did not
+exist: the pre-parse cut of `[D13]` was written and never wired in, so CI had been confirming
+it for a whole stage.
 
-**A mutation must assert that it applied.** A search string that no longer matches the
-source — a comment reworded, a line reformatted — leaves the code untouched and the suite
-green, which is indistinguishable from a test that cannot fail. Two of the five stage-5
-mutations silently did nothing until the scripts started failing loudly on a missed match;
-one of them was hiding a test that really could not fail.
-
-**Three traps that will come back:**
+**Two fixture traps that will come back:**
 
 - **A byte-fidelity fixture must be deliberately non-canonical** — a refolded header, a
   `From:` with no space after the colon, LF instead of CRLF. A canonical message survives a
@@ -87,10 +91,6 @@ one of them was hiding a test that really could not fail.
 - **A timing assertion must be far from both paths' real cost.** `elapsed < 2.0` could not
   tell a pre-parse cut from a full parse of 20 000 parts; at 100 000 parts the two are ~70x
   apart and the same assertion means something.
-- **A flag is not evidence that the thing the flag describes happened.** `truncated` is set
-  both by a dissection cut short and by one that ran to completion past its budget, so
-  asserting the flag proved nothing about the deadline being checked *between* units of
-  work. The assertion has to be that the result is genuinely shorter than the material.
 
 **Every fuzzer finding becomes a permanent test** with the offending bytes saved as a fixture
 `[D18]` — never a seed number in a log.

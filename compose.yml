@@ -43,7 +43,7 @@ services:
       options: { max-size: "10m", max-file: "3" }
 
   renderer:
-    image: gotenberg/gotenberg:8.24.2
+    image: gotenberg/gotenberg:8.37.0
     container_name: mail-dissect-renderer
     restart: unless-stopped
     command:
@@ -51,8 +51,11 @@ services:
       # Mail clients do not run scripts, so a render without them is MORE faithful to what
       # the recipient saw - this is not a trade-off between safety and quality (SPEC §14.2).
       - --chromium-disable-javascript=true
-      # The message must not be able to make the renderer fetch anything.
-      - --chromium-deny-list=.*
+      # The message must not be able to make the renderer fetch anything. An allow-list of
+      # file:// rather than a deny-list of everything: Gotenberg renders the uploaded page
+      # from its own file:/// URL, so denying `.*` denies that too and every render comes
+      # back 403 (F15). Verified against this image, not assumed.
+      - --chromium-allow-list=^file:///.*
       - --chromium-max-queue-size=10
       - --api-timeout=30s
     networks: [tools]

@@ -127,11 +127,12 @@ The full contract, including every closed value set and the reasoning behind it,
 ### Two things worth knowing before you read `observables[]`
 
 **A `.com` or `.org` domain also produces a `filename` candidate**, flagged `ambiguous: true`.
-`com` is the extension of `application/x-msdownload` and `org` is `text/x-org`, so two
-registries genuinely claim the string and the service refuses to guess which reading you
-meant. Over a corpus of real mail, 483 of 485 `filename` candidates were these twins. Drop one
-side with a single condition — `o["ambiguous"] and o["type"] == "filename"` — and keep the
-signal for `raport.zip`, where it matters.
+**60 of the 1441 single-label public suffixes are also file extensions**, and the 60 include
+`com` (the extension of `application/x-msdownload`) and `org` (`text/x-org`). Two registries
+genuinely claim the string, and the service refuses to guess which reading you meant — so
+expect this on nearly every domain in ordinary mail, not as a corner case. Drop one side with
+a single condition — `o["ambiguous"] and o["type"] == "filename"` — and keep the signal for
+`raport.zip`, where it matters.
 
 **Attachment filenames are not candidates.** They are a fact in `attachments[]`. What appears
 in `observables[]` is what the message *says*, not what it *carries*; the same distinction
@@ -203,8 +204,9 @@ defaults. See [`.env.example`](.env.example) for the whole surface.
 
 **Memory.** One request peaks at roughly the input size plus the parser's representation of it
 plus the largest decoded attachment; measured at the default limits, **452 MB for a 47 MB
-message carrying a 24 MB attachment**. Concurrent requests multiply that. Size the container
-from the limits you set, not from your typical message.
+message carrying a 24 MB attachment**. Three things multiply it: the limits you set,
+concurrent requests, and up to four concurrent calls to the optional tools (a constant, not a
+variable). Size the container from those, not from your typical message.
 
 ### Unwrapping rewritten links
 
@@ -263,6 +265,19 @@ says which. They must be reachable **for the service**, not for you.
   on purpose: parsing hostile HTML and *running* it are different risk profiles. Configure the
   renderer with scripting off and remote loading denied — mail clients do not run scripts
   either, so this is more faithful, not less.
+
+### Verified tool versions
+
+This release was tested against **`apache/tika:3.2.3.0`** and **`gotenberg/gotenberg:8.37.0`**
+— the versions `compose.yml` pins, exercised end to end by `tests/test_live_tools.py`. Pin
+those rather than `latest`: the call shapes are stable, but the renderer's own flags are not
+something to take on trust. The one in `compose.yml` is deliberate —
+`--chromium-allow-list=^file:///.*` rather than a deny-list of everything, because Gotenberg
+renders the uploaded page from a `file:///` URL of its own and denying `.*` denies that too,
+turning every render into a `403`.
+
+The minimal Tika image is the right one here: extracting text from office documents does not
+need OCR, and every extra parser is more surface reading a hostile file.
 
 ## Registries
 
