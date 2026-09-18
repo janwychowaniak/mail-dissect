@@ -7,6 +7,7 @@ what lets the orchestrator run this in a worker thread without dragging state al
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from .headers import (
@@ -57,7 +58,12 @@ def parse_message(
 
 
 def dissect_messages(
-    raw: bytes, *, max_attachment_bytes: int, max_parts: int, max_depth: int
+    raw: bytes,
+    *,
+    max_attachment_bytes: int,
+    max_parts: int,
+    max_depth: int,
+    should_stop: Callable[[], bool] | None = None,
 ) -> Dissection:
     """The top-level message and every message nested inside it, in order of appearance.
 
@@ -65,6 +71,10 @@ def dissect_messages(
     bytes, so reading order and document order are the same thing. The part budget is shared
     across all of them, because a nested message's parts are the dissection's parts too - and
     the alternative would let nesting multiply a limit that exists to bound the work.
+
+    `should_stop` is the whole-dissection deadline, asked BETWEEN messages `[D10]`. It is a
+    plain predicate rather than a clock, so this module stays a pure function of its input:
+    the caller owns the time, and the test that proves `truncated` owns it too.
     """
     result = Dissection()
     pending: list[tuple[bytes, int]] = [(raw, 0)]
@@ -72,7 +82,7 @@ def dissect_messages(
 
     while pending:
         current, depth = pending.pop(0)
-        if remaining <= 0:
+        if remaining <= 0 or (should_stop is not None and should_stop()):
             result.flags.add("truncated")
             break
         message = parse_message(

@@ -44,6 +44,83 @@ class ToolTally:
         return max(self._outcomes, key=lambda outcome: _SEVERITY[outcome])
 
 
+class TikaClient:
+    """Apache Tika Server's own protocol, so `apache/tika` needs no adapter (SPEC §14.1)."""
+
+    __slots__ = ("_client", "_timeout", "_url")
+
+    def __init__(self, client: httpx.AsyncClient, url: str, timeout_seconds: float) -> None:
+        self._client = client
+        self._url = url
+        self._timeout = timeout_seconds
+
+    async def extract(
+        self, payload: bytes, mime: str, budget: float
+    ) -> tuple[str | None, ToolState]:
+        """`PUT` the bytes, take back text. Never raises: a dead tool is a poorer mode."""
+        if budget <= 0:
+            return None, "timeout"
+        try:
+            response = await self._client.put(
+                self._url,
+                content=payload,
+                headers={"Accept": "text/plain", "Content-Type": mime},
+                timeout=min(self._timeout, budget),
+            )
+        except httpx.TimeoutException:
+            return None, "timeout"
+        except httpx.HTTPError:
+            return None, "down"
+        if response.status_code >= 400:
+            return None, "down"
+        return response.text, "ok"
+
+
+class ScreenshotClient:
+    """A Gotenberg-compatible screenshot route (SPEC §14.2).
+
+    The service does not render: running someone else's HTML is a different risk profile from
+    parsing it, which is why this is a component the deployment chooses and isolates.
+    """
+
+    __slots__ = ("_client", "_timeout", "_url")
+
+    _IMAGE_TYPES = ("image/png", "image/jpeg", "image/webp")
+
+    def __init__(self, client: httpx.AsyncClient, url: str, timeout_seconds: float) -> None:
+        self._client = client
+        self._url = url
+        self._timeout = timeout_seconds
+
+    async def render(
+        self, html: str, assets: dict[str, tuple[bytes, str]], budget: float
+    ) -> tuple[bytes | None, str | None, ToolState]:
+        """`POST` the message content plus its embedded resources; take back an image."""
+        if budget <= 0:
+            return None, None, "timeout"
+        files: list[tuple[str, tuple[str, bytes, str]]] = [
+            ("files", ("index.html", html.encode("utf-8"), "text/html"))
+        ]
+        for name, (payload, mime) in assets.items():
+            files.append(("files", (name, payload, mime)))
+        try:
+            response = await self._client.post(
+                self._url, files=files, timeout=min(self._timeout, budget)
+            )
+        except httpx.TimeoutException:
+            return None, None, "timeout"
+        except httpx.HTTPError:
+            return None, None, "down"
+        if response.status_code >= 400:
+            return None, None, "down"
+        content_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
+        if content_type not in self._IMAGE_TYPES or not response.content:
+            # A renderer that answers with something other than an image is not working,
+            # whatever status it chose to send.
+            return None, None, "down"
+        return response.content, content_type, "ok"
+
+
 class ToolProbes:
     """`/v1/health`'s view of the tools: probed on demand, behind a short cache [D6].
 

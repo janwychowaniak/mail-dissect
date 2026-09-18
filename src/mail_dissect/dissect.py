@@ -7,9 +7,14 @@ function of the input bytes.
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
+from dataclasses import dataclass, field
+
+import httpx
 
 from .artifacts import ArtifactStore
+from .deadline import Deadline
 from .decode import hash_bytes
 from .htmlscan import AnchorEvent, HtmlScan, ResourceEvent, TextEvent, scan_html
 from .message import ParsedMessage, dissect_messages
@@ -30,13 +35,18 @@ from .models import (
     ReceivedOut,
     ResourceOut,
     SourceHashes,
+    ToolsOut,
     scrub_surrogates,
 )
 from .observables import Collector, Source
 from .registries import Registries
 from .settings import Settings
+from .sniff import is_document
+from .tools import ScreenshotClient, TikaClient, ToolTally
 from .unwrap import Unwrapper
 from .urls import UrlParts, split
+
+MAX_TOOL_CONCURRENCY = 4
 
 _FLAG_ORDER: tuple[Flag, ...] = (
     "truncated",
@@ -94,25 +104,58 @@ class _Assembly:
         return cleaned
 
 
-def build_response(
+@dataclass(slots=True)
+class _Built:
+    """One message, assembled except for what the optional tools still have to add."""
+
+    message: MessageOut
+    parsed: ParsedMessage
+    collector: Collector
+    scan: HtmlScan | None
+    cid_map: dict[str, int] = field(default_factory=dict)
+
+
+async def build_response(
     raw: bytes,
     dissect_id: str,
     store: ArtifactStore,
     settings: Settings,
     registries: Registries,
+    client: httpx.AsyncClient,
+    deadline: Deadline,
 ) -> DissectResponse:
-    """Dissect the input and assemble the answer."""
-    dissection = dissect_messages(
+    """Dissect the input, call the optional tools, and assemble the answer.
+
+    Parsing is CPU-bound and runs in a worker thread; the tools are I/O and run concurrently.
+    The budget is enforced between units of work rather than around them `[D10]`.
+    """
+    dissection = await asyncio.to_thread(
+        dissect_messages,
         raw,
         max_attachment_bytes=settings.max_attachment_bytes,
         max_parts=settings.max_mime_parts,
         max_depth=settings.max_nesting_depth,
+        should_stop=deadline.expired,
     )
     assembly = _Assembly(store, dissect_id, settings)
     assembly.registries = registries
     assembly.flags |= dissection.flags
 
-    messages = [_build_message(parsed, assembly, settings) for parsed in dissection.messages]
+    built = [_build_message(parsed, assembly, settings) for parsed in dissection.messages]
+
+    tika = ToolTally(bool(settings.tika_url))
+    renderer = ToolTally(bool(settings.screenshot_url))
+    if settings.tika_url:
+        await _extract_document_text(built, assembly, settings, client, deadline, tika)
+    if settings.screenshot_url:
+        await _render_messages(built, assembly, settings, client, deadline, renderer)
+    if deadline.expired():
+        assembly.flags.add("truncated")
+
+    for item in built:
+        # Materialised last, so document text can only ever extend the tail `[D9]`.
+        item.message.observables = _materialise(item.collector, assembly)
+
     digests = hash_bytes(raw)
     ordered = [flag for flag in _FLAG_ORDER if flag in assembly.flags]
     return DissectResponse(
@@ -120,13 +163,161 @@ def build_response(
         source=SourceHashes(
             size=len(raw), md5=digests.md5, sha1=digests.sha1, sha256=digests.sha256
         ),
-        messages=messages,
+        messages=[item.message for item in built],
         artifacts=assembly.artifacts,
+        tools=ToolsOut(tika=tika.state, renderer=renderer.state),
         flags=ordered,
     )
 
 
-def _build_message(parsed: ParsedMessage, assembly: _Assembly, settings: Settings) -> MessageOut:
+async def _extract_document_text(
+    built: list[_Built],
+    assembly: _Assembly,
+    settings: Settings,
+    client: httpx.AsyncClient,
+    deadline: Deadline,
+    tally: ToolTally,
+) -> None:
+    """Send document attachments to the text extractor (SPEC §14.1).
+
+    Only document types: handing the tool an image or an archive is work with no result and
+    a wider surface for no reason. Results are applied in ascending `part_index`, so the
+    candidates they contribute enter the collector in the order `[D9]` fixes.
+    """
+    tika = TikaClient(client, settings.tika_url, settings.tika_timeout_seconds)
+    semaphore = asyncio.Semaphore(MAX_TOOL_CONCURRENCY)
+
+    async def call(item: _Built, info: PartInfo) -> tuple[_Built, PartInfo, str | None, str]:
+        async with semaphore:
+            if deadline.expired():
+                return item, info, None, "timeout"
+            assert info.payload is not None
+            text, state = await tika.extract(
+                info.payload, info.content_type, deadline.budget(settings.tika_timeout_seconds)
+            )
+            return item, info, text, state
+
+    jobs = [
+        call(item, item.parsed.tree.parts[index])
+        for item in built
+        for index in sorted(item.parsed.tree.attachments)
+        if _is_extractable(item.parsed.tree.parts[index])
+    ]
+    if not jobs:
+        return  # `skipped`: there was an address, and nothing to ask about.
+
+    for item, info, text, state in await asyncio.gather(*jobs):
+        tally.record(state)  # type: ignore[arg-type]
+        if not text:
+            continue
+        artifact_id = assembly.store_artifact(
+            "attachment_text",
+            text.encode("utf-8"),
+            message_index=item.message.index,
+            part_index=info.index,
+            filename=f"{info.filename or f'part-{info.index}'}.txt",
+        )
+        for attachment in item.message.attachments:
+            if attachment.part_index == info.index:
+                attachment.text_artifact_id = artifact_id
+        item.collector.feed_text(text, Source(kind="attachment", part_index=info.index))
+
+
+def _is_extractable(info: PartInfo) -> bool:
+    if info.payload is None:
+        return False
+    return is_document(info.detected_mime) or is_document(info.content_type)
+
+
+async def _render_messages(
+    built: list[_Built],
+    assembly: _Assembly,
+    settings: Settings,
+    client: httpx.AsyncClient,
+    deadline: Deadline,
+    tally: ToolTally,
+) -> None:
+    """Render every message that has an HTML body, nested ones included `[D3]`."""
+    renderer = ScreenshotClient(
+        client, settings.screenshot_url, settings.screenshot_timeout_seconds
+    )
+    semaphore = asyncio.Semaphore(MAX_TOOL_CONCURRENCY)
+
+    async def call(item: _Built) -> tuple[_Built, bytes | None, str | None, str]:
+        async with semaphore:
+            if deadline.expired():
+                return item, None, None, "timeout"
+            html, assets = _render_payload(item)
+            image, mime, state = await renderer.render(
+                html, assets, deadline.budget(settings.screenshot_timeout_seconds)
+            )
+            return item, image, mime, state
+
+    jobs = [call(item) for item in built if item.message.body.html_part_index is not None]
+    if not jobs:
+        return
+
+    for item, image, mime, state in await asyncio.gather(*jobs):
+        tally.record(state)  # type: ignore[arg-type]
+        if image is None or mime is None:
+            continue
+        assembly.store_artifact(
+            "screenshot",
+            image,
+            message_index=item.message.index,
+            filename=f"{item.message.index}-screenshot.{mime.rsplit('/', 1)[-1]}",
+            mime=mime,
+        )
+
+
+def _render_payload(item: _Built) -> tuple[str, dict[str, tuple[bytes, str]]]:
+    """The message's HTML, with its `cid:` references pointing at the parts sent beside it.
+
+    Asset names come from the PART INDEX, never from the sender's filename: a hostile name
+    must not be able to shape the multipart we emit.
+    """
+    index = item.message.body.html_part_index
+    assert index is not None
+    info = item.parsed.tree.parts[index]
+    html = info.text.text if info.text else ""
+    assets: dict[str, tuple[bytes, str]] = {}
+    for content_id, part_index in item.cid_map.items():
+        part = item.parsed.tree.parts[part_index]
+        if part.payload is None:
+            continue
+        mime = part.detected_mime or part.content_type
+        extension = mime.rsplit("/", 1)[-1] if "/" in mime else "bin"
+        name = f"cid-{part_index}.{extension}"
+        assets[name] = (part.payload, mime)
+        html = html.replace(f"cid:{content_id}", name)
+    return html, assets
+
+
+def _materialise(collector: Collector, assembly: _Assembly) -> list[ObservableOut]:
+    return [
+        ObservableOut(
+            value=assembly.text(candidate.value),
+            value_raw=assembly.text(candidate.value_raw),
+            type=candidate.type,
+            subtype=candidate.subtype,
+            defanged=candidate.defanged,
+            ambiguous=candidate.ambiguous,
+            occurrences=candidate.occurrences,
+            sources=[
+                ObservableSourceOut(
+                    kind=source.kind,
+                    header_name=source.header_name,
+                    header_index=source.header_index,
+                    part_index=source.part_index,
+                )
+                for source in candidate.sources
+            ],
+        )
+        for candidate in collector.finish()
+    ]
+
+
+def _build_message(parsed: ParsedMessage, assembly: _Assembly, settings: Settings) -> _Built:
     index = parsed.index
     # [D12]: the eml artifact carries the bytes that were in the input.
     assembly.store_artifact("eml", parsed.raw, message_index=index, filename=f"message-{index}.eml")
@@ -139,8 +330,8 @@ def _build_message(parsed: ParsedMessage, assembly: _Assembly, settings: Setting
     cid_map = _cid_map(parsed)
     body = _build_body(parsed, assembly, settings, scan)
     links, resources = _build_addresses(scan, assembly, cid_map)
-    observables = _build_observables(parsed, assembly, scan, cid_map)
-    return MessageOut(
+    collector = _scan_observables(parsed, assembly, scan)
+    message = MessageOut(
         index=index,
         depth=parsed.depth,
         headers={
@@ -179,17 +370,17 @@ def _build_message(parsed: ParsedMessage, assembly: _Assembly, settings: Setting
         mime_parts=[_build_part(info, assembly) for info in parsed.tree.parts],
         links=links,
         resources=resources,
-        observables=observables,
         attachments=[
             _build_attachment(parsed.tree.parts[part_index], assembly, index)
             for part_index in parsed.tree.attachments
         ],
     )
+    return _Built(message=message, parsed=parsed, collector=collector, scan=scan, cid_map=cid_map)
 
 
-def _build_observables(
-    parsed: ParsedMessage, assembly: _Assembly, scan: HtmlScan | None, cid_map: dict[str, int]
-) -> list[ObservableOut]:
+def _scan_observables(
+    parsed: ParsedMessage, assembly: _Assembly, scan: HtmlScan | None
+) -> Collector:
     """Scan this message in the order of `[D9]`: headers, then text, then HTML.
 
     The collector is append-only, so candidates that a later stage adds from document text
@@ -220,27 +411,7 @@ def _build_observables(
                 # so the two lists and this one describe the same thing (SPEC §11).
                 collector.feed_url(assembly.unwrapper.apply(event.href).href, source)
 
-    return [
-        ObservableOut(
-            value=assembly.text(candidate.value),
-            value_raw=assembly.text(candidate.value_raw),
-            type=candidate.type,
-            subtype=candidate.subtype,
-            defanged=candidate.defanged,
-            ambiguous=candidate.ambiguous,
-            occurrences=candidate.occurrences,
-            sources=[
-                ObservableSourceOut(
-                    kind=source.kind,
-                    header_name=source.header_name,
-                    header_index=source.header_index,
-                    part_index=source.part_index,
-                )
-                for source in candidate.sources
-            ],
-        )
-        for candidate in collector.finish()
-    ]
+    return collector
 
 
 def _build_part(info: PartInfo, assembly: _Assembly) -> MimePartOut:

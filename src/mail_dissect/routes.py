@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from . import __version__
 from .artifacts import Lookup, content_disposition, valid_id
+from .deadline import Deadline
 from .dissect import build_response
 from .errors import AppError, new_dissect_id
 from .intake import boundary_of, extract_form_field, looks_like_message
@@ -62,7 +63,15 @@ async def dissect(request: Request) -> JSONResponse:
             "UNPARSABLE", "input has no header line before the first empty line", dissect_id
         )
 
-    response = build_response(raw, dissect_id, store, settings, request.app.state.registries)
+    response = await build_response(
+        raw,
+        dissect_id,
+        store,
+        settings,
+        request.app.state.registries,
+        request.app.state.client,
+        Deadline(settings.dissect_timeout_seconds, clock),
+    )
     log_event(
         "dissect",
         dissect_id=dissect_id,

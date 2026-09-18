@@ -52,7 +52,7 @@ line saying where it came from.
 | 10 | oversized attachment → `truncated`, rest of the dissection complete | §15 | `test_mime::test_oversized_attachment` |
 | 11 | `sha256` of the message and attachments matches an independent computation | §13.2 | `test_mime::test_all_three_hashes_match_an_independent_computation` |
 | 12 | full dissection with no name resolution and no route out | §2 | `conftest::_no_network` + CI `isolation` job |
-| 13 | optional dependencies disabled → `tools{}` says so, result complete otherwise | §14 | stage 1 / 5 |
+| 13 | optional dependencies disabled → `tools{}` says so, result complete otherwise | §14 | `test_tools::test_tools_disabled_make_no_calls` + `…a_tool_that_fails_does_not_fail…` |
 | 14 | artifact past its lifetime, without a restart → `ARTIFACT_EXPIRED` (410) | §13.4 | `test_artifacts::test_expired_artifact_is_410_without_a_restart` |
 | 15 | two nestings with HTML each → two `body_html` artifacts, different `message_index` | §13.1 | `test_mime::test_two_nestings_with_html_give_two_body_artifacts` |
 | 16 | attachment with broken encoding → `attachment_unreadable`, hashes `null` | §15 | `test_mime::test_attachment_with_broken_encoding` |
@@ -91,17 +91,17 @@ line saying where it came from.
 | 49 | `text_from_html` with and without a `text/plain` part | §9.3 | `test_html::test_text_from_html` |
 | 50 | inline threshold for `html` and for `text_from_html` | §8 | `test_html::test_inline_threshold_per_representation` |
 | 51 | all three hashes for the message and every attachment | §13.2 | `test_mime::test_all_three_hashes_match_an_independent_computation` |
-| 52 | working Tika → `attachment_text`, candidates with an `attachment` source | §14.1 | stage 5 |
-| 53 | working renderer → `screenshot` artifact with `message_index` | §14.2 | stage 5 |
-| 54 | whole-dissection budget exceeded → 200, `ok: true`, `truncated` | §15 | stage 5 |
+| 52 | working Tika → `attachment_text`, candidates with an `attachment` source | §14.1 | `test_tools::test_working_text_extractor` |
+| 53 | working renderer → `screenshot` artifact with `message_index` | §14.2 | `test_tools::test_working_renderer` |
+| 54 | whole-dissection budget exceeded → 200, `ok: true`, `truncated` | §15 | `test_tools::test_the_whole_budget_is_enforced_between_units` |
 | 55 | unknown `artifact_id` with a valid `dissect_id` → 404 | §16 | `test_artifacts::test_unknown_artifact_id_with_a_valid_dissect_id` |
 | 56 | candidates from headers carry `header_name` and `header_index` | §11.1 | `test_observables::test_candidates_from_headers_name_their_place` |
 | 57 | artifact response headers: octet-stream, sanitised filename, nosniff | §13.3 | `test_mime::test_attachment_filename_is_sanitised_in_the_response_header` |
-| 58 | mixed tool outcome → worst wins (`timeout`), per-item links still correct | §14 | stage 5 |
-| 59 | nested message screenshot → two `screenshot` artifacts | §13.1, §14.2 | stage 5 |
+| 58 | mixed tool outcome → worst wins (`timeout`), per-item links still correct | §14 | `test_tools::test_the_worst_outcome_wins` |
+| 59 | nested message screenshot → two `screenshot` artifacts | §13.1, §14.2 | `test_tools::test_nested_message_gets_its_own_screenshot` |
 | 60 | rewritten resource → target in `href`, `rewritten_from`, `unwrap_failed` on failure | §10 | `test_html::test_rewritten_resource` |
 | 61 | health and dependencies: `disabled` with no traffic, `down`, one probe per TTL | §14.3 | `test_health::test_disabled_tools_are_never_probed`, `…_unreachable_tools_are_down…` |
-| 62 | stable core of `observables[]` with and without document extraction | §11.1 | stage 5 |
+| 62 | stable core of `observables[]` with and without document extraction | §11.1 | `test_tools::test_the_deterministic_core_does_not_move` |
 | 63 | nested original byte-for-byte, hash matching an independent computation | §13.2 | `test_mime::test_nested_original_is_byte_identical` |
 | 64 | transport-encoded nesting → a parsed message, `eml` after decoding | §6.2 | `test_mime::test_transport_encoded_nesting_is_still_a_message` |
 | 65 | part count far over the limit → `truncated` in scan time, no full tree | §15 | `test_mime::test_part_count_far_over_the_limit_is_cut_in_scan_time` |
