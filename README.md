@@ -279,7 +279,16 @@ says which. They must be reachable **for the service**, not for you.
 This release was tested against **`apache/tika:3.2.3.0`** and **`gotenberg/gotenberg:8.37.0`**
 — the versions `compose.yml` pins, exercised end to end by `tests/test_live_tools.py`. Pin
 those rather than `latest`: the call shapes are stable, but the renderer's own flags are not
-something to take on trust. The one in `compose.yml` is deliberate —
+something to take on trust.
+
+For a host that has no route to a registry and receives images by hand, the digests those
+tags resolved to are:
+
+```
+apache/tika@sha256:c0154cb95587cde64be74f35ada1a2bd7892219f3f0ac3c9dc6cab34046b3573
+gotenberg/gotenberg@sha256:f29984bd1e226bf1b93ba90af06000afa8b315853e99d27b9aaa41b93f15c769
+ghcr.io/janwychowaniak/mail-dissect@sha256:1f773c29ddcea0ca33a5b4247e9b181dee09343fc54cf1d103f473602e329ef0
+``` The one in `compose.yml` is deliberate —
 `--chromium-allow-list=^file:///.*` rather than a deny-list of everything, because Gotenberg
 renders the uploaded page from a `file:///` URL of its own and denying `.*` denies that too,
 turning every render into a `403`.
