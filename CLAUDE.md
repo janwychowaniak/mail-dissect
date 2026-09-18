@@ -91,6 +91,16 @@ stage 2 found two tests that proved nothing, one of them hiding a behaviour that
 exist: the pre-parse cut of `[D13]` was written and never wired in, so CI had been confirming
 it for a whole stage.
 
+**The same rule in the shell, where nobody looks for it.** Each of these produced a silent
+zero that read as a result during this project:
+
+- **`pkill -f <pattern>`** matches full command lines, so it matches the shell that launched
+  it and kills itself mid-script. Record the PID at start (`command & echo $!`) and kill that.
+- **`cmd | tail -1`** returns `tail`'s exit status, so a failing `cmd` passes an `&&` chain.
+  Two files went out unformatted behind a gate that reported success.
+- **`docker run -v "$PWD/file.py:/app.py"`** silently creates a **directory** when the source
+  file does not exist, and the container then fails for a reason that looks unrelated.
+
 **Two fixture traps that will come back:**
 
 - **A byte-fidelity fixture must be deliberately non-canonical** — a refolded header, a
