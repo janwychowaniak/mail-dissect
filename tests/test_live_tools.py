@@ -7,7 +7,11 @@ found to be misplaced about the hardening flags we recommend.
 
     docker run -d --name md-tika -p 127.0.0.1:9998:9998 apache/tika:3.2.3.0
     docker run -d --name md-shot -p 127.0.0.1:3000:3000 gotenberg/gotenberg:8.37.0 \\
-        gotenberg --chromium-disable-javascript=true --chromium-allow-list='^file:///.*'
+        gotenberg --chromium-disable-javascript=true --chromium-allow-list='^file:///tmp/.*'
+
+Use the flags `compose.yml` uses, not looser ones: these tests are also what would notice an
+allow-list narrowed too far, because the render would answer 403 and `tools.renderer` would
+come back `down` (F15).
     MAIL_DISSECT_LIVE_TOOLS=1 uv run pytest tests/test_live_tools.py -v -m live
 """
 

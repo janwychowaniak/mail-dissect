@@ -51,11 +51,21 @@ services:
       # Mail clients do not run scripts, so a render without them is MORE faithful to what
       # the recipient saw - this is not a trade-off between safety and quality (SPEC §14.2).
       - --chromium-disable-javascript=true
-      # The message must not be able to make the renderer fetch anything. An allow-list of
-      # file:// rather than a deny-list of everything: Gotenberg renders the uploaded page
-      # from its own file:/// URL, so denying `.*` denies that too and every render comes
-      # back 403 (F15). Verified against this image, not assumed.
-      - --chromium-allow-list=^file:///.*
+      # The message must not be able to make the renderer fetch anything. This allow-list is
+      # what blocks a beacon, measured with a positive control (F15) - and it blocks it
+      # whether or not the network is isolated, which is what protects a deployment that
+      # copies this file without the `internal: true` below.
+      #
+      # An allow-list, not a deny-list of everything: Gotenberg serves the uploaded page from
+      # a file:///tmp/… URL of its own, so `--chromium-deny-list=.*` denies the very document
+      # it was asked to render and every render answers 403.
+      #
+      # Scoped to /tmp rather than all of file://, which costs nothing and says the intention
+      # here instead of inheriting it from the tool's own default deny-list.
+      - --chromium-allow-list=^file:///tmp/.*
+      # A fresh process every few renders. The default of 100 suits documents; this input is
+      # hostile HTML, and a restart costs almost nothing.
+      - --chromium-restart-after=5
       - --chromium-max-queue-size=10
       - --api-timeout=30s
     networks: [tools]

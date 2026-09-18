@@ -245,29 +245,49 @@ versions pinned in `compose.yml`.
 `Accept: text/plain` and the attachment's `Content-Type` returns the extracted text as the
 body. A 617-byte hand-built PDF carrying one line came back with that line, verbatim.
 
-**Gotenberg's screenshot route works — but the hardening flag we recommended breaks it.**
-`POST /forms/chromium/screenshot/html` with an `index.html` file part returns `image/png`.
-With `--chromium-deny-list=.*`, however, every render returns **403 Forbidden**:
+**Gotenberg's screenshot route works, and `--chromium-deny-list=.*` breaks it.** Every render
+under that flag answers **403 Forbidden**:
 
 ```
 HTML screenshot: screenshot: filter URL:
 'file:///tmp/…/….html' matches the expression from the denied list
 ```
 
-Gotenberg renders the uploaded page from a `file:///` URL of its own, so a deny-list that
-covers everything covers that too. The working form is an allow-list instead:
+The reason is narrow and worth stating precisely: **Gotenberg serves the uploaded page from a
+`file:///tmp/…` URL of its own**, so a rule that denies everything denies the document it was
+asked to render. It is not that scoping `file:` is infeasible — the tool's own default deny
+list is `^file:(?!//\/tmp/).*`, a negative lookahead expressing exactly "deny `file:` outside
+/tmp". An earlier version of this finding claimed the engine had no lookahead and that such a
+rule could not be written; that was wrong, and the wrong version invited a looser
+configuration.
 
-```
---chromium-allow-list=^file:///.*
-```
+**The allow-list is what stops a beacon, and it does so without any network isolation.**
+Measured with a positive control — the same renderer, the same page, only the allow-list
+differing — against a listener in the same container network:
 
-which permits the page being rendered and nothing else — `200`, `image/png`. Its RE2 engine
-has no lookahead, so "deny everything except file://" cannot be written as a deny-list.
+| Renderer configuration | Requests reaching the listener |
+| --- | --- |
+| `--chromium-allow-list='^file:///.*\|^http://beacon-srv:8099/.*'` | **2** (`/img`, `/iframe`) |
+| `--chromium-allow-list='^file:///.*'` | **0** |
+| `--chromium-allow-list='^file:///tmp/.*'` | **0** |
+
+The path was proven reachable first (`curl` from inside the renderer container reached the
+listener), so the zero is a block rather than a broken experiment. This is a stronger property
+than "the network has no route out": a deployment that copies the example without isolating
+the network is still protected from a message beaconing to its sender.
+
+**The allow-list does not switch off the built-in deny-list.** A page containing
+`<iframe src="file:///etc/hostname">` renders to an image **byte-identical** to the same page
+pointing at a file that does not exist, under both `^file:///.*` and `^file:///tmp/.*`.
+
+`^file:///tmp/.*` is therefore the better example: it costs nothing — ordinary renders,
+embedded assets and the beacon block all behave identically — and it states the intention in
+our own configuration instead of inheriting it from somebody else's default.
 
 Two smaller observations: Gotenberg's own Chromium reaches for `accounts.google.com` and
-`optimizationguide-pa.googleapis.com` at startup, blocked by its internal pinning proxy and
-by a network with no route out; and a tag we had pinned, `gotenberg/gotenberg:8.24.2`, does
-not exist at all — it was written from memory, and pulling it is what proved that.
+`android.clients.google.com` at startup, which the allow-list blocks and the logs record; and
+a tag we had pinned, `gotenberg/gotenberg:8.24.2`, does not exist at all — it was written from
+memory, and pulling it is what proved that.
 
 ## Open, to be probed in stage 1 (needs the project's dependencies installed)
 

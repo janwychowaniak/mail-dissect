@@ -262,9 +262,17 @@ says which. They must be reachable **for the service**, not for you.
   candidates join the same `observables[]` list as everything else.
 - **`SCREENSHOT_URL`** — a Gotenberg screenshot route works with no adapter. Every message
   with an HTML body is rendered, nested ones included. The service does not render in-process
-  on purpose: parsing hostile HTML and *running* it are different risk profiles. Configure the
-  renderer with scripting off and remote loading denied — mail clients do not run scripts
-  either, so this is more faithful, not less.
+  on purpose: parsing hostile HTML and *running* it are different risk profiles.
+
+  **Configure the renderer with scripting off and an allow-list, and copy the flags from
+  `compose.yml`.** Mail clients do not run scripts either, so a render without them is more
+  faithful, not less. The allow-list matters more than it looks: with
+  `--chromium-allow-list=^file:///tmp/.*` a message that embeds `<img src="http://attacker…">`
+  produces **no request at all** — measured against a listener the renderer could otherwise
+  reach — so the reader is protected from a beacon even if they never isolate the network.
+  Do **not** reach for `--chromium-deny-list=.*` instead: Gotenberg serves the page it is
+  rendering from a `file:///tmp/…` URL of its own, so that rule denies the document and every
+  render answers 403.
 
 ### Verified tool versions
 
