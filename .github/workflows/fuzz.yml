@@ -1,0 +1,31 @@
+name: fuzz
+
+# The long resilience run, with a random seed. The short deterministic one is part of every
+# CI run; this is the one that looks for what fixed seeds cannot reach.
+#
+# A finding here does not end its life as a seed number in a log: save the bytes into
+# tests/regressions/ and they are replayed on every run afterwards [D18].
+on:
+  schedule: [{ cron: '23 3 * * *' }]
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: 'Seed to reproduce a previous finding (blank picks a random one)'
+        required: false
+
+permissions: { contents: read }
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Long run
+        env:
+          MAIL_DISSECT_FUZZ_SEED: ${{ inputs.seed }}
+        # -s so the seed is printed: a failure has to be reproducible with one command.
+        run: uv run pytest -q -m fuzz -s

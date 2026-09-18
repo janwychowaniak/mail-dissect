@@ -111,6 +111,9 @@ line saying where it came from.
 
 | Requirement | SPEC.md | Test |
 | --- | --- | --- |
-| No mutation raises an unhandled exception or exceeds the time limit | §18 | stage 6 |
-| The mutation seed is reported and every finding becomes a permanent test | §18 | stage 6 |
-| Determinism, including array order | §17 | stage 6 |
+| No mutation raises an unhandled exception or exceeds the time limit | §18 | `test_fuzz::test_mutations_do_not_topple_the_service` (fixed seeds, every run) |
+| The long run, with a reported seed | §18 | `test_fuzz::test_the_long_run` (marker `fuzz`, nightly) |
+| Every finding becomes a permanent test | §18 | `test_fuzz::test_saved_findings_stay_fixed` over `tests/regressions/` |
+| Determinism, including array order | §17 | `test_determinism::test_the_same_message_twice`, `…both_channels_agree` |
+| A stable reordering is still caught | §17 | `test_determinism::test_golden_observables` |
+| The tool contracts hold against the real images | §14 | `test_live_tools` (marker `live`, by hand) |

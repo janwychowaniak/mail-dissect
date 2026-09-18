@@ -42,6 +42,9 @@ select = ["E", "F", "I", "UP", "B", "SIM", "W", "RUF"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The default run is the short, deterministic one: fixed seeds, a few hundred mutations.
+# `-m fuzz` asks for the long run instead, and a command-line -m replaces this one.
+addopts = "-m 'not fuzz'"
 markers = [
     "fuzz: the long fuzz run with a random seed (not part of the default suite)",
     "live: needs a real Tika or renderer container (never runs in CI)",
