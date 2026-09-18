@@ -67,9 +67,7 @@ def test_real_tika_extracts_the_text_we_then_scan(live_client: TestClient) -> No
 
         attachment = body["messages"][0]["attachments"][0]
         assert attachment["text_artifact_id"], "the extracted text became an artifact"
-        fetched = client.get(
-            f"/v1/artifact/{body['dissect_id']}/{attachment['text_artifact_id']}"
-        )
+        fetched = client.get(f"/v1/artifact/{body['dissect_id']}/{attachment['text_artifact_id']}")
         assert DOCUMENT_TEXT in fetched.text
 
     # The candidates in the document join the one canonical list, with their own source.
