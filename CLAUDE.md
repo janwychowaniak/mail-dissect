@@ -16,6 +16,12 @@
   `trust_env=False`. CPU-bound parsing is offloaded with `asyncio.to_thread`, one message or one
   attachment per unit.
 - **Test material is synthetic only.** No third-party mail corpora, ever (`docs/SPEC.md` §18).
+- **Somebody else's data never enters this repository** — not a corpus, and not statistics
+  derived from one. A measurement taken on a maintainer's own mail arrives here as a
+  **property to verify, not as figures to quote**: a reader cannot check them, and they were
+  not ours to publish. Re-derive the point from something public instead — the registry
+  overlap in F14 replaced a corpus count for exactly this reason, and says the same thing
+  better.
 
 ## Source of truth
 
@@ -27,6 +33,29 @@ decided. `docs/spec-coverage.md` maps every requirement and acceptance case to i
 its test; a row without a test is a promise nobody checks.
 
 Defects are reported against `docs/SPEC.md` — its contract and its decision numbers.
+
+## Defect intake
+
+A report arrives as three things, and each has somewhere to land:
+
+- a **minimal synthetic repro** — the structure reproduced, never anyone's content;
+- a **control** — what the difference is visible on, and what shows the measurement reached
+  the code at all rather than failing before it;
+- a **reference into the contract** — the `[D#]` or the acceptance case it concerns.
+
+They arrive as **two separate lists**, because they ask two different questions:
+
+- **Defects** ask *does this match `docs/SPEC.md`*. The repro becomes a file in
+  `tests/regressions/`, replayed on every run `[D18]`; the fix follows it, and the control
+  goes into the assertion or its docstring, because that is what separates "fixed" from
+  "stopped reproducing".
+- **Surprises** ask *is the contract where we want it*. Nothing is broken, so nothing is
+  fixed: the answer is a numbered decision in `docs/SPEC.md`, or a recorded "leaving it,
+  because…". The `.com`/`.org` collision is the worked example — the rule stayed, the
+  documents started saying what it costs.
+
+Keeping them apart is the point: merged into one list, the second question disappears, and it
+is usually the more valuable one.
 
 ## Language
 
@@ -50,6 +79,19 @@ uv run pytest -q                        # offline; the socket guard is autouse
 uv run pytest -q --cov --cov-fail-under=90   # what CI gates on [D17]
 uv run pytest -q -m fuzz                # the long fuzz run, random seed
 DOCKER_BUILDKIT=0 docker build -t mail-dissect:dev .
+```
+
+**The tool contracts are checked against real images, by hand.** `tests/test_live_tools.py`
+never runs in CI — it needs two containers — and it exists because the fakes prove our side of
+the contract and nothing about theirs. Use the versions and flags `compose.yml` pins, not
+looser ones, since these tests are also what would notice an allow-list narrowed too far:
+
+```bash
+docker run -d --name md-tika -p 127.0.0.1:9998:9998 apache/tika:3.2.3.0
+docker run -d --name md-shot -p 127.0.0.1:3000:3000 gotenberg/gotenberg:8.37.0 \
+    gotenberg --chromium-disable-javascript=true --chromium-allow-list='^file:///tmp/.*' \
+    --chromium-restart-after=5
+MAIL_DISSECT_LIVE_TOOLS=1 uv run pytest tests/test_live_tools.py -q -m live
 ```
 
 The Dockerfile must stay buildable with the classic builder — no `RUN --mount`, no heredocs, no
@@ -137,3 +179,8 @@ The full record is `docs/SPEC.md` §22. The ones most likely to be "improved" by
   texts, so the deterministic core of the list does not move when a tool is absent.
 - **[D15]** HTML is parsed with the standard library; do not reach for `lxml` for "robustness".
 - **[D20]** scrubbing an unserialisable string is reported as `encoding_fallback`, never silent.
+- **[D21]** only the ICANN section of the public suffix list is loaded; adding the PRIVATE
+  section looks like completeness and silently stops `github.io` and `blogspot.com` from being
+  domains at all.
+- **[D23]** `malformed_mime` marks what failed to parse, never what merely looks unusual.
+  Raising it on a binary body looks like diligence and makes the flag mean nothing.
