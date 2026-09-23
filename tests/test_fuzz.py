@@ -73,6 +73,17 @@ def _check(client: TestClient, raw: bytes, label: str, budget: float) -> None:
     assert elapsed < budget, f"{label}: took {elapsed:.1f}s"
 
 
+def _long_run_seed() -> int:
+    """The seed asked for, or a fresh one — and an empty value counts as not asking.
+
+    A scheduled workflow has no inputs, so `${{ inputs.seed }}` arrives as an empty string
+    rather than as an unset variable. Read as a seed, that failed every nightly run before the
+    first mutation was drawn.
+    """
+    asked = os.environ.get("MAIL_DISSECT_FUZZ_SEED", "").strip()
+    return int(asked) if asked else random.randrange(2**32)
+
+
 @pytest.mark.parametrize("seed", DEFAULT_SEEDS)
 def test_mutations_do_not_topple_the_service(client: TestClient, seed: int) -> None:
     """The short, deterministic run. Fixed seeds so CI fails for a reason, not by luck."""
@@ -91,7 +102,7 @@ def test_the_long_run(client: TestClient) -> None:
     A finding does not end its life as a seed number: save the bytes into `regressions/` and
     it is replayed forever after `[D18]`.
     """
-    seed = int(os.environ.get("MAIL_DISSECT_FUZZ_SEED", random.randrange(2**32)))
+    seed = _long_run_seed()
     print(f"\nfuzz seed: {seed}  (MAIL_DISSECT_FUZZ_SEED={seed} to reproduce)")
     rng = random.Random(seed)
     corpus = _corpus()
@@ -99,6 +110,20 @@ def test_the_long_run(client: TestClient) -> None:
         original = rng.choice(corpus)
         name, damaged = mutate.mutate(original, rng)
         _check(client, damaged, f"seed={seed} round={round_number} mutation={name}", 30.0)
+
+
+def test_the_long_run_starts_the_way_the_schedule_starts_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The long run never runs in the default suite, so its setup is checked here instead.
+
+    The empty value is the nightly workflow's, and the one it used to die on; the explicit
+    one is how a finding is reproduced.
+    """
+    monkeypatch.setenv("MAIL_DISSECT_FUZZ_SEED", "")
+    assert 0 <= _long_run_seed() < 2**32
+    monkeypatch.setenv("MAIL_DISSECT_FUZZ_SEED", "1337")
+    assert _long_run_seed() == 1337
 
 
 @pytest.mark.parametrize("path", sorted(REGRESSIONS.glob("*.eml")), ids=lambda p: p.name)

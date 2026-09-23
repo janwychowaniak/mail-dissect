@@ -26,6 +26,8 @@ jobs:
       - run: uv sync --frozen
       - name: Long run
         env:
+          # Empty on a schedule and on a blank dispatch, never unset: the test reads an empty
+          # value as "pick one", which is the path every nightly run takes.
           MAIL_DISSECT_FUZZ_SEED: ${{ inputs.seed }}
         # -s so the seed is printed: a failure has to be reproducible with one command.
         run: uv run pytest -q -m fuzz -s
