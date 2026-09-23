@@ -24,16 +24,29 @@ def test_both_channels_give_identical_results(client: TestClient) -> None:
     assert through_form["source"] == raw["source"]
 
 
-def test_large_field_survives_the_form_channel(client: TestClient) -> None:
-    """R6: the framework caps a non-file field at 1 MB and text-decodes it (F11).
+@pytest.mark.parametrize("as_file", [False, True], ids=["field", "file"])
+def test_a_large_field_survives_the_form_channel(client: TestClient, as_file: bool) -> None:
+    """SPEC §4, F11: the framework caps a non-file field at 1 MB and picks its codec by content.
 
-    Reading the form ourselves is what keeps the channels byte-identical, so the test uses a
-    message well past that cap and compares hashes rather than status codes.
+    So the message goes as a plain field, past the cap, and carries both valid UTF-8 and a
+    lone 8-bit byte - the two contents F11 shows arriving as the same string. The file part is
+    the control: the same hand-built form with a filename, which the framework would have
+    passed intact, so a red field next to a green file is the channel and not the form.
     """
-    big = b"From: a@example.com\r\nSubject: big\r\n\r\n" + b"x" * (3 * 1024 * 1024)
-    form = client.post("/v1/dissect", files={"eml": ("m.eml", big, "message/rfc822")})
-    assert form.status_code == 200
-    assert form.json()["source"]["sha256"] == hashlib.sha256(big).hexdigest()
+    raw = (
+        "From: a@example.com\r\nSubject: big\r\n\r\ncafé ".encode()
+        + b"caf\xe9 "
+        + b"x" * (3 * 1024 * 1024)
+    )
+    disposition = b'form-data; name="eml"' + (b'; filename="m.eml"' if as_file else b"")
+    form = b"--FF\r\nContent-Disposition: " + disposition + b"\r\n\r\n" + raw + b"\r\n--FF--\r\n"
+    response = client.post(
+        "/v1/dissect", content=form, headers={"content-type": "multipart/form-data; boundary=FF"}
+    )
+    assert response.status_code == 200
+    through_form = response.json()
+    assert through_form["source"]["sha256"] == hashlib.sha256(raw).hexdigest()
+    assert mask_environment(through_form) == mask_environment(dissect(client, raw))
 
 
 def test_binary_file_is_unparsable(client: TestClient) -> None:
