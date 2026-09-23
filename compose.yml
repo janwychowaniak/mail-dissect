@@ -14,7 +14,7 @@ services:
     # Pinned like the tools below, and for the same reason: `latest` is not a contract
     # (SPEC §21). A deployment that pulls rather than builds - or transfers images to a host
     # with no route to a registry - needs a tag that means one thing forever.
-    image: ghcr.io/janwychowaniak/mail-dissect:0.1.0
+    image: ghcr.io/janwychowaniak/mail-dissect:0.1.1
     container_name: mail-dissect
     restart: unless-stopped
     environment:

@@ -6,4 +6,4 @@ referenced from the code as [D#] and measured stdlib behaviour as F# (docs/resea
 
 __all__ = ["__version__"]
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
