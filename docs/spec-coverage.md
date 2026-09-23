@@ -59,7 +59,7 @@ line saying where it came from.
 | 17 | message over the input limit → `TOO_LARGE` (413), no parse attempted | §15, §16 | `test_intake::test_message_over_the_input_limit` |
 | 18 | request for an artifact listing → 404, never an enumeration | §4 | `test_artifacts::test_no_listing_endpoint` |
 | 19 | artifact after a restart → `ARTIFACT_NOT_FOUND` (404) | §13.4 | `test_artifacts::test_artifact_from_a_previous_process_life_is_404` |
-| 20 | the same input through both channels → identical results | §4 | `test_intake::test_both_channels_give_identical_results` |
+| 20 | the same input through both channels → identical results | §4 | `test_intake::test_both_channels_give_identical_results`, `…_a_large_field_survives_the_form_channel` |
 | 21 | `mailto:` anchor and `cid:` resource → both present, `host: null`, `cid_part` set | §9.1 | `test_html::test_mailto_anchor_and_cid_resource` |
 | 22 | remote image and an anchor with the same address → both lists, one observable | §11 | `test_observables::test_an_address_in_both_lists_is_one_observable` + `test_html::…same_address…` |
 | 23 | URL with `userinfo` → `host` and `userinfo` split correctly | §9.1 | `test_html::test_url_with_userinfo` |

@@ -66,7 +66,7 @@ from a document, a screenshot) belong to the service. Judgements, lists and thre
 
 Both input channels must produce identical results for identical bytes, so the multipart body
 is read by the service itself rather than through the framework's file handling, which caps
-and text-decodes non-file fields `[R6]`.
+and text-decodes non-file fields (F11).
 
 **Artifact access rests entirely on identifiers being unguessable** (the capability-URL
 pattern, as with presigned URLs). Three requirements follow, and without any of them the whole
@@ -183,7 +183,7 @@ Two narrow pieces are added on top:
 - a **byte-range locator**, used only for `message/rfc822` parts, which finds the part's body
   span in the input. It is self-checking: a located span is accepted only if re-parsing it
   yields the same structure the standard library returned for that part; a mismatch raises
-  `malformed_mime` rather than silently disagreeing `[R1]`.
+  `malformed_mime` rather than silently disagreeing `[D12]`.
 - a **cheap pre-pass** over the raw bytes that establishes the number of parts and the nesting
   depth **before** the tree is built `[D13]`.
 
