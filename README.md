@@ -313,10 +313,7 @@ independently, on Docker 29.1.3 with the `overlay2` image store: `RepoDigests` c
 image first, because a `load` over an image that is still present is a no-op that leaves the
 old metadata in place and reads as "the digest survived". Whether the containerd image store
 behaves differently is untested. Compare the checksum of the archive instead — it is the
-artifact both sides actually hold. The one in `compose.yml` is deliberate —
-`--chromium-allow-list=^file:///.*` rather than a deny-list of everything, because Gotenberg
-renders the uploaded page from a `file:///` URL of its own and denying `.*` denies that too,
-turning every render into a `403`.
+artifact both sides actually hold.
 
 The minimal Tika image is the right one here: extracting text from office documents does not
 need OCR, and every extra parser is more surface reading a hostile file.
