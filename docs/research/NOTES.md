@@ -1,12 +1,19 @@
-# CPython `email` / `html.parser` — research notes
+# Research notes — CPython `email`, the dependencies, the tools
 
-Probed **2026-09-17** on **CPython 3.13.12** with
-[`probes/email_stdlib.py`](probes/email_stdlib.py). Every finding below is printed by one
-function in that script; re-run it against a newer interpreter to see whether a finding
-still holds. The probes are offline, read-only and stdlib-only.
+F1–F10 were probed **2026-09-17** on **CPython 3.13.12** with
+[`probes/email_stdlib.py`](probes/email_stdlib.py), which needs nothing but the standard
+library, and F11–F12 on **2026-09-23** with [`probes/dependencies.py`](probes/dependencies.py)
+against the versions in `uv.lock`. Each of them is printed by one function in its script; re-run
+the script against a newer interpreter or dependency to see whether a finding still holds. Both
+scripts are offline and read-only. From F13 on, each finding says how it was measured.
 
 These notes feed [`../SPEC.md`](../SPEC.md). Where something is a **decision**, the spec
-wins; this file records only **what the standard library actually does**.
+wins; this file records only **what the standard library, the dependencies and the tools
+actually do**.
+
+Finding numbers are identifiers: code, tests and commit messages cite them, so a number is
+never reassigned. There is no F9. A finding that turns out wrong is corrected under its own
+number, as F15 was.
 
 ---
 
@@ -191,6 +198,55 @@ the species `[D8]` keeps out of the registries.
 
 ---
 
+## F11 — the framework's form handling caps a text field and picks its codec by content
+
+Probed on Starlette **1.6.0** with python-multipart **0.0.32**, which `request.form()` needs
+and `uv.lock` does not contain: the service never calls it, so the probe installs it on the
+side.
+
+| `eml` part | `request.form()["eml"]` |
+| --- | --- |
+| field, ASCII (control) | `str`; encoding it back gives the input under UTF-8 and latin-1 alike |
+| field, valid UTF-8 | `str`; only UTF-8 gives the input back |
+| field, one 8-bit byte | `str`; only latin-1 gives the input back |
+| field, valid UTF-8 plus one 8-bit byte | `str`; only latin-1 gives the input back |
+| field, 2 MB | **400** `Part exceeded maximum size of 1024KB.` |
+| file part (`filename=`), 3 MB of 8-bit bytes | bytes, identical |
+
+A part without `filename=` is decoded as UTF-8 when it can be and **silently as latin-1 when it
+cannot**, so the codec is chosen by the content, and one stray byte anywhere switches the whole
+field. The decoding is not reversible: `Subject: café` in UTF-8 and `Subject: caf\xe9` arrive as
+**the same string**. Two different messages, one value, and no hash taken from it identifies
+what was sent. The cap is per field, not per request: a message just over 1 MB sent as a field is
+refused, while the same bytes sent as a file go through untouched.
+
+Hence the form is read by hand (SPEC §4, `src/mail_dissect/intake.py`), so that a client
+posting the message as a plain field gets the same bytes, hashes and result as one posting it as
+a file or raw.
+
+## F12 — `idna` refuses hosts that a message can contain
+
+Probed on idna **3.20**.
+
+| Host | `idna.encode(host, uts46=True, transitional=False)` |
+| --- | --- |
+| `bücher.example` (control) | `xn--bcher-kva.example` |
+| `a_b.example` | `InvalidCodepoint`: U+005F not allowed |
+| `ü_b.example` | `InvalidCodepoint`: U+005F not allowed |
+| `-bad-.example` | `IDNAError`: label must not start or end with a hyphen |
+| a 64-character label, ASCII or not | `IDNAError`: label too long |
+
+`idna.decode` returns `bücher.example` for `xn--bcher-kva.example` and refuses an A-label that
+is not valid punycode (`xn--zz.example`: `Invalid A-label`).
+
+Every refusal is an IDNA2008 rule applied correctly, and every refused host is one that a
+message can carry and a hostile one will. Letting the exception decide would drop the host from
+the result, which hides a fact about the message because the fact is malformed. Hence
+`canonical_host` in `src/mail_dissect/urls.py`: an ASCII host goes through `idna` only when it
+has an `xn--` label, so the refusals above never reach it; a refused non-ASCII host falls back
+to its lowercased original and has no `host_punycode`; and an `xn--` host that does not decode
+keeps its A-label and has no Unicode form.
+
 ## F13 — the extension registry does not know the script extensions
 
 Measured against a 64-item probe of extensions that occur in mail, `mime-db@1.54.0` (1 239
@@ -289,6 +345,15 @@ Two smaller observations: Gotenberg's own Chromium reaches for `accounts.google.
 a tag we had pinned, `gotenberg/gotenberg:8.24.2`, does not exist at all — it was written from
 memory, and pulling it is what proved that.
 
+**The request shape is held by `tests/test_live_tools.py`, not by a capture.** A captured
+request and response were once promised here. They were never committed, and the live tests do
+the job better: a capture records one exchange, while a test repeats it against whichever image
+a maintainer runs it on. The pinned image answers the request `tools.py` sends (the page as
+`index.html` in the `files` field) with a PNG, both by magic bytes and by `image/png`. **Asset
+resolution is only half held:** `test_an_embedded_image_reaches_the_renderer` proves that the
+renderer accepts a `cid:` asset uploaded alongside the page, not that the image appears in the
+render.
+
 ## F16 — moving images to a host that cannot pull
 
 Probed **2026-09-18** on Docker **29.1.3**, storage driver **overlay2** (the classic image
@@ -320,14 +385,3 @@ exit status ignored. Verify between steps that the removal actually removed some
 Whether the containerd image store behaves differently is untested. The practical answer does
 not depend on it: compare the **checksum of the archive** on both sides, since that is the
 artifact both sides actually hold.
-
-## Open, to be probed in stage 1 (needs the project's dependencies installed)
-
-- **Starlette multipart limits.** Whether a non-file `eml` part is capped and text-decoded
-  while a file part spools unbounded, on the exact Starlette version we pin. Decides how
-  `routes.py` reads the form — see `[R6]`.
-- **`idna` strictness.** Which hosts `idna.encode(uts46=True)` rejects (`a_b.example`,
-  `-bad-.example`, over-long labels) and what the fallback must be for `host_punycode`.
-- **Gotenberg screenshot route.** Field names, asset resolution and the response content type
-  against a pinned `gotenberg/gotenberg` image — see `[R5]`; captured request/response will
-  be committed next to these notes.

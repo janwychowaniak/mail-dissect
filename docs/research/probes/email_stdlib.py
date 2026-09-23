@@ -2,7 +2,7 @@
 
 Run:  python3.13 docs/research/probes/email_stdlib.py
 
-Every finding in ../NOTES.md is produced by one function here. The probes are
+Findings F1 to F10 in ../NOTES.md are produced by one function each here. The probes are
 read-only, offline, and depend on nothing but the standard library, so anyone
 can re-run them against a newer interpreter and see whether a finding still
 holds. Print output is the evidence; keep it terse enough to paste.
