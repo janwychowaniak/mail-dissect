@@ -158,47 +158,113 @@ def test_an_eight_bit_header_byte_is_replaced_and_reported(client: TestClient) -
         # A broken encoded-word is the other way to a U+FFFD, and F7 promised the flag for it.
         (b"Subject: =?utf-8?q?caf=E9?=", "caf\ufffd", ["encoding_fallback"]),
         (b"Subject: =?utf-8?q?caf=C3=A9?=", "café", []),
+        # A charset nobody can look up is a declaration that was not taken (SPEC §5.1).
+        (b"Subject: =?x-no-such-charset?q?cafe?=", None, ["encoding_fallback"]),
         # A U+FFFD the sender wrote is material, not a substitution.
         ("Subject: caf\ufffd".encode(), "caf\ufffd", []),
     ],
 )
-def test_a_header_is_flagged_only_for_what_decoding_replaced(
-    client: TestClient, header: bytes, expected: str, flags: list[str]
+def test_a_header_is_flagged_only_when_reading_it_fell_back(
+    client: TestClient, header: bytes, expected: str | None, flags: list[str]
 ) -> None:
+    """SPEC §5.1: `encoding_fallback` fires when, and only when, reading fell back."""
     body = dissect(client, b"From: a@example.com\r\n" + header + b"\r\n\r\nb")
-    assert body["messages"][0]["headers"]["subject"] == [expected]
+    if expected is not None:
+        assert body["messages"][0]["headers"]["subject"] == [expected]
     assert body["flags"] == flags
 
 
-def test_an_eight_bit_byte_in_a_part_header_is_replaced_and_reported(client: TestClient) -> None:
+def test_raw_utf8_in_an_address_is_read_without_loss(client: TestClient) -> None:
+    """[D20] as amended: a scrub that loses nothing is not reported.
+
+    The address is cleaned by the scrub, not by the header registry, so this is the case the
+    amendment is about; the 8-bit twin in the test above still raises the flag.
+    """
+    body = dissect(client, "From: a@example.com\r\nTo: Zoë <zoë@x.example>\r\n\r\nb".encode())
+    message = body["messages"][0]
+    assert message["headers"]["to"] == ["Zoë <zoë@x.example>"]
+    assert message["addresses"]["to"][0]["display_name"] == "Zoë"
+    assert message["addresses"]["to"][0]["address"] == "zoë@x.example"
+    assert body["flags"] == []
+
+
+@pytest.mark.parametrize(
+    ("byte", "shown", "flags"),
+    [
+        (b"e", "cafe", []),  # the control
+        (b"\xe9", "caf\ufffd", ["encoding_fallback"]),
+        ("é".encode(), "café", []),
+    ],
+    ids=["ascii", "8-bit", "utf-8"],
+)
+def test_a_non_ascii_byte_in_a_part_header_is_read_and_served(
+    client: TestClient, byte: bytes, shown: str, flags: list[str]
+) -> None:
     """[D20], F17: the part's fields are read out of headers too, and served back by name.
 
     `content_id` and the filename reached the JSON encoder unscrubbed, and the filename would
-    have reached `Content-Disposition` when the attachment is fetched. The twin is the control.
+    have reached `Content-Disposition` when the attachment is fetched. Only the byte that does
+    not decode is reported; UTF-8 reads without loss.
     """
-
-    def with_byte(byte: bytes) -> bytes:
-        return (
-            b"From: a@example.com\r\nContent-Type: multipart/mixed; boundary=BB\r\n\r\n"
-            b"--BB\r\nContent-Type: text/plain\r\n\r\nbody\r\n--BB\r\n"
-            b"Content-Type: application/octet-stream\r\nContent-ID: <caf" + byte + b"@x>\r\n"
-            b'Content-Disposition: attachment; filename="caf' + byte + b'.bin"\r\n'
-            b"\r\npayload\r\n--BB--\r\n"
-        )
-
-    twin = dissect(client, with_byte(b"e"))
-    assert twin["messages"][0]["mime_parts"][2]["content_id"] == "<cafe@x>"
-    assert twin["flags"] == []
-
-    body = dissect(client, with_byte(b"\xe9"))
-    assert body["messages"][0]["mime_parts"][2]["content_id"] == "<caf\ufffd@x>"
-    assert body["messages"][0]["mime_parts"][2]["filename"] == "caf\ufffd.bin"
-    assert body["flags"] == ["encoding_fallback"]
+    raw = (
+        b"From: a@example.com\r\nContent-Type: multipart/mixed; boundary=BB\r\n\r\n"
+        b"--BB\r\nContent-Type: text/plain\r\n\r\nbody\r\n--BB\r\n"
+        b"Content-Type: application/octet-stream\r\nContent-ID: <caf" + byte + b"@x>\r\n"
+        b'Content-Disposition: attachment; filename="caf' + byte + b'.bin"\r\n'
+        b"\r\npayload\r\n--BB--\r\n"
+    )
+    body = dissect(client, raw)
+    part = body["messages"][0]["mime_parts"][2]
+    assert part["content_id"] == f"<{shown}@x>"
+    assert part["filename"] == f"{shown}.bin"
+    assert body["flags"] == flags
     attachment = next(a for a in body["artifacts"] if a["kind"] == "attachment")
-    assert attachment["filename"] == "caf\ufffd.bin"
+    assert attachment["filename"] == f"{shown}.bin"
     fetched = client.get(f"/v1/artifact/{body['dissect_id']}/{attachment['artifact_id']}")
     assert fetched.status_code == 200
     assert fetched.content == b"payload"
+
+
+@pytest.mark.parametrize(
+    ("disposition", "expected", "flags"),
+    [
+        (b'filename="plain.txt"', "plain.txt", []),  # the control: nothing declared
+        (b"filename*=utf-8''caf%C3%A9.txt", "café.txt", []),
+        (b"filename*=utf-8''caf%E9.txt", "caf\ufffd.txt", ["encoding_fallback"]),
+        (b"filename*=x-no-such-charset''cafe.txt", None, ["encoding_fallback"]),
+        (b'filename="=?utf-8?q?caf=C3=A9.txt?="', "café.txt", []),
+        (b'filename="=?utf-8?q?caf=E9.txt?="', "caf\ufffd.txt", ["encoding_fallback"]),
+        (b'filename="=?x-no-such-charset?q?cafe.txt?="', None, ["encoding_fallback"]),
+    ],
+    ids=[
+        "plain",
+        "rfc2231-utf8",
+        "rfc2231-bad-bytes",
+        "rfc2231-unknown-charset",
+        "rfc2047-utf8",
+        "rfc2047-bad-bytes",
+        "rfc2047-unknown-charset",
+    ],
+)
+def test_a_filename_is_flagged_only_when_its_declaration_fails(
+    client: TestClient, disposition: bytes, expected: str | None, flags: list[str]
+) -> None:
+    """SPEC §5.1: both ways of declaring a filename's charset, taken or not.
+
+    The standard library takes neither failure aloud: an RFC 2231 charset it cannot look up is
+    read as another one, and bytes that do not decode become U+FFFD, both without a defect.
+    """
+    raw = (
+        b"From: a@example.com\r\nContent-Type: multipart/mixed; boundary=BB\r\n\r\n"
+        b"--BB\r\nContent-Type: text/plain\r\n\r\nbody\r\n--BB\r\n"
+        b"Content-Type: application/octet-stream\r\n"
+        b"Content-Disposition: attachment; " + disposition + b"\r\n"
+        b"\r\npayload\r\n--BB--\r\n"
+    )
+    body = dissect(client, raw)
+    if expected is not None:
+        assert body["messages"][0]["mime_parts"][2]["filename"] == expected
+    assert body["flags"] == flags
 
 
 def test_source_hashes_are_of_the_message_bytes(client: TestClient) -> None:

@@ -423,6 +423,12 @@ it cannot read with a `ValueError` rather than a `LookupError` — `UnicodeEncod
 `'caf\udce9'`, `ValueError` for `'utf\x00'`, against `LookupError` for `'x-nonsense'` — so a
 `charset=` parameter carrying an 8-bit byte or a NUL fell out of the ladder of SPEC §7.2.
 
+A filename declares a charset in a third way, RFC 2231, and `get_filename()` takes both kinds
+of failure silently too: `filename*=utf-8''caf%E9.txt` comes back as `'caf\ufffd.txt'`, and
+`filename*=x-no-such-charset''caf%E9.txt` as `'café.txt'`, read in some other charset, both
+without a defect. `email.utils.collapse_rfc2231_value` decodes with `replace` and falls back on
+a charset it cannot find, so whether the declaration was taken has to be checked separately.
+
 The declared type also travels on, as the `Content-Type` of the request to the text extractor.
 Measured by hand with `httpx` 0.28.1 against `apache/tika:3.2.3.0`: a type with a byte above
 0x7F in it, surrogate or valid UTF-8 alike, raises `UnicodeEncodeError` before anything is sent,

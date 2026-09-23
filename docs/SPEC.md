@@ -136,6 +136,15 @@ pass the response through layers that handle very long strings badly. Bytes stay
 **The value sets of `type`, `subtype`, `sources[].kind`, `artifacts[].kind`, `flags` and
 `tools` are CLOSED.** Extending any of them is a version change (§21), not an addition.
 
+**`encoding_fallback` fires when, and only when, the service could not take the material's
+word for how it is encoded, or had to substitute something in order to read it.** Not taking
+its word: a declared charset — a part's (§7.2), an encoded-word's, an RFC 2231 parameter's —
+that cannot be looked up, or that does not decode what it declares. Substituting: U+FFFD
+standing where the material had bytes that do not decode, a header byte that is not UTF-8
+among them `[D20]`. Material that reads without loss does not raise it, whichever path it
+took — raw UTF-8 in a header, say — because a flag that also fires where nothing happened
+teaches its consumer to ignore it exactly when it starts to matter.
+
 The reason is practical, not aesthetic: a field with an open value set — or a bag with a
 neutral name such as `facts`, `extras` or `meta` — accumulates consumer policy over time,
 first as a small convenience and then as a dependency that cannot be withdrawn. When something
@@ -267,7 +276,8 @@ The decoding ladder is fixed, so that two implementations agree:
 
 `charset_declared` is the parameter exactly as written; `charset_used` is the canonical name of
 the codec actually used. **`encoding_fallback`** is raised when a declaration existed and the
-codec actually used differs from it, or when any replacement character was substituted. No
+codec actually used differs from it, or when any replacement character was substituted — the
+two halves of its definition in §5.1. No
 statistical charset detection is used: its verdicts change between library versions, which
 would make the determinism criterion (§17) depend on a third registry version.
 
@@ -839,11 +849,14 @@ concurrent tool calls — and cannot derive the third from anywhere else.
 
 Size the container from the limits you actually configure, not from the typical message.
 
-**Strings that cannot be serialised are scrubbed, and the scrubbing is reported.** One 8-bit
-byte in a header can produce a lone surrogate that makes the JSON response raise inside the
-framework (F5). Such strings are scrubbed at the response boundary, and because the returned
-string is then no longer what stood in the material, the response carries `encoding_fallback`
-`[D20]` — the flag already means exactly that, so the contract needs no extension.
+**Strings that cannot be serialised are scrubbed, and a scrub that loses anything is
+reported.** One 8-bit byte in a header can produce a lone surrogate that makes the JSON response
+raise inside the framework (F5, F17). Such strings are scrubbed at the response boundary: the
+escaped bytes are read back as UTF-8, as the header registry reads them. Where they decode, the
+string is what the sender wrote and there is nothing to report; where they do not, U+FFFD stands
+in, the returned string is no longer what stood in the material, and the response carries
+`encoding_fallback` `[D20]` — the flag already means exactly that (§5.1), so the contract needs
+no extension.
 
 ## 16. Error contract
 
@@ -966,8 +979,11 @@ Approved by the maintainer, 2026-09-17.
   never probing a `disabled` tool; `POST /v1/dissect` never reads that cache.
 - **[D14] `sources[]` lists distinct places, `occurrences` counts every occurrence.** With no
   offsets in the schema, "all the places it occurred" can only mean distinct places.
-- **[D20] Unserialisable strings are scrubbed at the response boundary, and the scrubbing is
-  reported as `encoding_fallback`** — never silently.
+- **[D20] Unserialisable strings are scrubbed at the response boundary, and a scrub that
+  substitutes anything is reported as `encoding_fallback`** — never silently; one that loses
+  nothing is not reported at all. Amended for 0.2.0: until then every scrub was reported,
+  including a lossless one, which made the flag fire on raw UTF-8 in an address but not on the
+  same bytes in a subject.
 
 **Implementation**
 
@@ -1007,8 +1023,10 @@ Approved by the maintainer, 2026-09-17.
 
 **Delivery**
 
-- **[D16] The first image tag is `v0.1.0`.** The stability promise is carried by `/v1` in the
-  path; `1.0.0` follows the first real consumer use and the round of defects it produces.
+- **[D16] The first image tag is `v0.1.0`, and `1.0.0` is released when the consumer says
+  it is.** The stability promise is carried by `/v1` in the path. The major version marks the
+  consumer's judgement that the contract holds on real material — not a date, and not a count
+  of defect rounds — so until the consumer says so, releases stay below `1.0.0`.
 - **[D17] `mypy --strict` and a 90% coverage floor**, a deliberate exception to the house
   pattern for service repositories, because the contract is large and closed. Above both:
   **every assertion must be able to fail**, verified by breaking the behaviour it describes.

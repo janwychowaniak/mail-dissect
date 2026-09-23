@@ -72,7 +72,6 @@ class _Assembly:
         self.registries: Registries | None = None
         self.artifacts: list[ArtifactOut] = []
         self.flags: set[str] = set()
-        self.scrubbed = False
 
     def store_artifact(
         self,
@@ -101,11 +100,10 @@ class _Assembly:
         return reference.artifact_id
 
     def text(self, value: str) -> str:
-        cleaned, changed = scrub_surrogates(value)
-        if changed:
+        cleaned, lost = scrub_surrogates(value)
+        if lost:
             # [D20]: what is returned is no longer what stood in the material, so say so.
             self.flags.add("encoding_fallback")
-            self.scrubbed = True
         return cleaned
 
 

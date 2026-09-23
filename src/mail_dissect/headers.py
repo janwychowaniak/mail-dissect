@@ -7,6 +7,7 @@ the address headers the contract names are not address types in the standard lib
 
 from __future__ import annotations
 
+import codecs
 import ipaddress
 import re
 from dataclasses import dataclass
@@ -14,6 +15,8 @@ from email.headerregistry import AddressHeader, HeaderRegistry, UniqueAddressHea
 from email.message import Message
 from email.parser import BytesHeaderParser
 from email.policy import Compat32
+
+from .models import substituted
 
 
 class _Compat32Text(Compat32):
@@ -65,48 +68,85 @@ def decode_value(name: str, value: str) -> str:
         return value
 
 
+# An RFC 2047 encoded-word; its charset may carry an RFC 2231 language suffix (`utf-8*en`).
+_ENCODED_WORD = re.compile(r"=\?([^?*\s]+)(?:\*[^?\s]*)?\?[QqBb]\?[^?\s]*\?=")
+
+
 def header_map(raw: bytes) -> tuple[dict[str, list[str]], bool]:
     """Every header, names lowercased, values in order of appearance (SPEC §7).
 
     No selection: `headers` returns all of them, because choosing which matter is the
-    consumer's business. The second value says whether decoding substituted anything: the
-    registry puts U+FFFD where bytes do not decode, an 8-bit byte or a broken encoded-word
-    alike, and says nothing (F7, F17), so the substitution is counted here and reported as
-    `encoding_fallback` (SPEC §7.2).
+    consumer's business. The second value says whether reading any of them fell back, which
+    is `encoding_fallback` (SPEC §5.1).
     """
     message = BytesHeaderParser(policy=COMPAT32_TEXT).parsebytes(raw)
     result: dict[str, list[str]] = {}
-    substituted = False
+    fell_back = False
     for name, value in message.items():
-        decoded = decode_value(name, value)
-        substituted = substituted or _substituted(value, decoded)
+        decoded, this_fell_back = _read(name, value)
+        fell_back = fell_back or this_fell_back
         result.setdefault(name.lower(), []).append(decoded)
-    return result, substituted
+    return result, fell_back
 
 
-def _substituted(value: str, decoded: str) -> bool:
-    """Whether `decoded` has a U+FFFD that the sender did not write.
+def _read(name: str, value: str) -> tuple[str, bool]:
+    """One header value decoded, and whether that fell back (SPEC §5.1).
 
-    A U+FFFD the sender did write arrives either as the character itself or, in a raw 8-bit
-    header, as its three UTF-8 bytes escaped to surrogates; both are counted as written.
+    The registry takes neither kind of fallback aloud: an encoded-word in a charset nobody can
+    look up comes back undecoded, and bytes that do not decode come back as U+FFFD - an 8-bit
+    byte and a broken encoded-word alike - and neither leaves a defect (F7, F17).
     """
-    written = value.count("\ufffd") + value.count("\udcef\udcbf\udcbd")
-    return decoded.count("\ufffd") > written
+    decoded = decode_value(name, value)
+    unknown = any(not _known_charset(m.group(1)) for m in _ENCODED_WORD.finditer(value))
+    return decoded, unknown or substituted(value, decoded)
 
 
-def filename_of(part: Message) -> str | None:
-    """The attachment's name as the message wrote it — not yet sanitised.
+def _known_charset(name: str | None) -> bool:
+    if not name:
+        return True  # Nothing was declared, so nothing was refused.
+    try:
+        codecs.lookup(name)
+    except (LookupError, ValueError):
+        return False
+    return True
+
+
+def filename_of(part: Message) -> tuple[str | None, bool]:
+    """The attachment's name as the message wrote it — not yet sanitised — and whether reading
+    it fell back (SPEC §5.1).
 
     `policy.default` is used only for this one value: it is the only policy that decodes an
     RFC 2047 encoded-word inside a filename, which is non-standard but common (F4). Neither
-    policy strips path components, so that stays the service's job (SPEC §13.3).
+    policy strips path components, so that stays the service's job (SPEC §13.3). An RFC 2231
+    name declares a charset too: the standard library reads a charset it cannot look up as some
+    other one, and bytes that do not decode as U+FFFD, and says nothing about either.
     """
+    declared = part.get_param("filename", None, "content-disposition")
+    if declared is None:
+        declared = part.get_param("name", None, "content-type")
+    fell_back = isinstance(declared, tuple) and not _decodes(declared[0], declared[2])
     name = part.get_filename()
     if not name:
-        return None
+        return None, fell_back
     if "=?" in name:
-        name = decode_value("content-disposition", name)
-    return name or None
+        name, word_fell_back = _read("content-disposition", name)
+        fell_back = fell_back or word_fell_back
+    return name or None, fell_back
+
+
+def _decodes(charset: str | None, text: str) -> bool:
+    """Does an RFC 2231 value decode, strictly, in the charset it declares?
+
+    The bytes `email.utils.collapse_rfc2231_value` decodes, without its two silences: it
+    decodes with `replace`, and it falls back on a charset it cannot find.
+    """
+    if not charset:
+        return True
+    try:
+        bytes(text, "raw-unicode-escape").decode(charset)
+    except (LookupError, ValueError):
+        return False
+    return True
 
 
 @dataclass(frozen=True, slots=True)

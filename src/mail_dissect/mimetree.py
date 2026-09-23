@@ -98,11 +98,14 @@ def _visit(
         return
 
     content_type = part.get_content_type()
+    filename, filename_fell_back = filename_of(part)
+    if filename_fell_back:
+        tree.flags.add("encoding_fallback")
     info = PartInfo(
         index=len(tree.parts),
         content_type=content_type,
         disposition=part.get_content_disposition(),
-        filename=filename_of(part),
+        filename=filename,
         content_id=(part.get("content-id") or "").strip() or None,
         charset_declared=_declared_charset(part),
         transfer_encoding=(part.get("content-transfer-encoding") or "").strip().lower() or None,

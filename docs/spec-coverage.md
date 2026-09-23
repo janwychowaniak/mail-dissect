@@ -116,7 +116,7 @@ line saying where it came from.
 | Every finding becomes a permanent test | §18 | `test_fuzz::test_saved_findings_stay_fixed` over `tests/regressions/` |
 | A byte above 0x7F in any header, the message's or a part's, is dissected, never a 500 | §18 | `test_fuzz::test_a_non_ascii_byte_in_any_header_is_dissected`, mutator `non_ascii_header_bytes` |
 | The extractor gets the declared type only when a request header can carry it | §14.1 | `test_tools::test_the_extractor_gets_a_type_a_header_can_carry` |
-| A header byte that is replaced or scrubbed is reported, and only then | §7.2, `[D20]` | `test_intake::test_an_eight_bit_header_byte_is_replaced_and_reported`, `…_flagged_only_for_what_decoding_replaced`, `…_in_a_part_header_is_replaced_and_reported` |
+| `encoding_fallback` fires when a declaration is not taken or something is substituted, and only then | §5.1, §7.2, `[D20]` | `test_intake::test_an_eight_bit_header_byte_is_replaced_and_reported`, `…_flagged_only_when_reading_it_fell_back`, `…_raw_utf8_in_an_address_is_read_without_loss`, `…_non_ascii_byte_in_a_part_header_is_read_and_served`, `…_filename_is_flagged_only_when_its_declaration_fails` |
 | Determinism, including array order | §17 | `test_determinism::test_the_same_message_twice`, `…both_channels_agree` |
 | A stable reordering is still caught | §17 | `test_determinism::test_golden_observables` |
 | The tool contracts hold against the real images | §14 | `test_live_tools` (marker `live`, by hand) |

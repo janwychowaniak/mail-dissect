@@ -326,6 +326,16 @@ def f17_compat32_hands_out_a_header_object() -> None:
     ):
         header = registry("subject", value)
         print(f"registry {label:24s} -> {str(header)!r}  defects={len(header.defects)}")
+    for disposition in (
+        b"filename*=utf-8''caf%C3%A9.txt",
+        b"filename*=utf-8''caf%E9.txt",
+        b"filename*=x-no-such-charset''caf%E9.txt",
+    ):
+        part = message_from_bytes(
+            b"Content-Disposition: attachment; " + disposition + b"\r\n\r\nx",
+            policy=email.policy.compat32,
+        )
+        print(f"{disposition.decode():42s} -> {part.get_filename()!r}  defects={part.defects}")
     for name in ("caf\udce9", "utf\x00", "x-nonsense"):
         try:
             result = codecs.lookup(name).name

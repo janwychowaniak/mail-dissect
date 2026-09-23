@@ -211,23 +211,34 @@ class HealthOut(BaseModel):
     extra_file_extensions: list[str]
 
 
+def substituted(material: str, result: str) -> bool:
+    """Whether `result` has a U+FFFD that the sender did not write.
+
+    A U+FFFD the sender did write arrives either as the character itself or, from a raw 8-bit
+    header, as its three UTF-8 bytes escaped to surrogates; both are counted as written.
+    """
+    written = material.count("\ufffd") + material.count("\udcef\udcbf\udcbd")
+    return result.count("\ufffd") > written
+
+
 def scrub_surrogates(value: str) -> tuple[str, bool]:
-    """Make a string serialisable, and say whether that changed it (F5, [D20]).
+    """Make a string serialisable, and say whether that lost anything (F5, F17, [D20]).
 
     One 8-bit byte in a header can produce a lone surrogate, which raises inside the JSON
-    encoder on Starlette's path and would turn five bytes of input into a 500. Scrubbing is
-    mandatory — but the result is then no longer what stood in the material, so the caller
-    raises `encoding_fallback` rather than changing the answer silently.
+    encoder on Starlette's path and would turn five bytes of input into a 500, so scrubbing is
+    mandatory. The escaped bytes are read back as UTF-8, as the header registry reads the same
+    bytes: where they decode, the result is what the sender wrote and there is nothing to
+    report; where they do not, U+FFFD stands in and the caller raises `encoding_fallback`.
     """
     try:
         value.encode("utf-8")
     except UnicodeEncodeError:
-        try:
-            # A lone surrogate is an 8-bit byte the parser escaped. Reading the bytes back as
-            # UTF-8, U+FFFD where that fails, is what the header registry does with the same
-            # bytes, so a header and the address decomposed from it agree about one byte (F17).
-            cleaned = value.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
-        except UnicodeEncodeError:
-            cleaned = value.encode("utf-8", "replace").decode("utf-8")
-        return cleaned, True
-    return value, False
+        pass
+    else:
+        return value, False
+    try:
+        cleaned = value.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
+    except UnicodeEncodeError:
+        # A surrogate that did not come from a byte: there is nothing to read back.
+        return value.encode("utf-8", "replace").decode("utf-8"), True
+    return cleaned, substituted(value, cleaned)
