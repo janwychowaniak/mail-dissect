@@ -103,8 +103,8 @@ implementation is worse than no test, because it is counted as coverage.
 
 **One rule, because the forms keep changing.** Every failure of this discipline so far has
 been the same thing wearing a different coat: **the test was green for a reason that has
-nothing to do with the behaviour it describes.** Five forms have turned up so far, in tests and
-in measurements alike, and the sixth will not look like any of them — which is why the rule is
+nothing to do with the behaviour it describes.** Six forms have turned up so far, in tests and
+in measurements alike, and the seventh will not look like any of them — which is why the rule is
 worth more than the list:
 
 - **An assertion that cannot fail.** `assert uptime_seconds >= 0` passed for months of
@@ -125,6 +125,12 @@ worth more than the list:
   is hidden by `2>/dev/null` and an ignored exit status is the same thing as an assertion that
   cannot fail: a `docker rmi` that quietly failed turned the next step into a no-op, and the
   no-op read as a result (F16). Check between steps that the preparation actually happened.
+- **A measurement of the neighbour.** F5 measured what one 8-bit header byte does under
+  `policy.default`; the tree is read under `compat32` `[D11]`, where that value is not even a
+  string, and one such byte in any header of a message was a 500 for a whole release (F17).
+  The measurement was true and the decision built on it was right; neither was about the thing
+  that shipped. Measure on the configuration that runs — the policy, the image, the host — not
+  on the one next to it.
 
 **Mutation is a ritual of every stage, not a gesture.** Before a stage is pushed, pick its
 load-bearing behaviours, break each one in the source on purpose, and check that the tests
@@ -142,6 +148,12 @@ zero that read as a result during this project:
   Two files went out unformatted behind a gate that reported success.
 - **`docker run -v "$PWD/file.py:/app.py"`** silently creates a **directory** when the source
   file does not exist, and the container then fails for a reason that looks unrelated.
+- **`gh run watch <id>` with its output discarded** returned at once while the runs were still
+  queued, and the loop around it reported CI as finished. Poll the run's `status` until it is
+  `completed`, and read the conclusion from that.
+- **`echo "$body"` in zsh** interprets backslash escapes, so the `\n` inside a JSON string
+  becomes a newline and a valid response fails to parse — which reads as the service's fault.
+  Write the body to a file (`curl -o`) and parse the file.
 
 **Two fixture traps that will come back:**
 
@@ -171,6 +183,9 @@ The full record is `docs/SPEC.md` §22. The ones most likely to be "improved" by
 
 - **[D11]** the MIME tree comes from `policy.compat32`, not `policy.default` — the latter costs
   ~10× per part and would blow the dissection budget on a large message (F3).
+- **`COMPAT32_TEXT`**, not stock `compat32`, is the policy every parser uses. The stock one
+  hands a header value with an 8-bit byte out as an `email.header.Header`, not a string, and
+  "simplifying" the subclass away brings back a 500 on one byte in any header (F17).
 - **[D12]** the `eml` artifact carries original bytes; never reassemble a message to produce it
   or its hashes (F1).
 - **[D13]** part and nesting limits are established before the tree is built; a limit checked
