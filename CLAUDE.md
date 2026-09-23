@@ -174,6 +174,11 @@ Tags are `v*` and must equal `pyproject.version`; CI hard-fails otherwise. The r
 publishes `ghcr.io/janwychowaniak/mail-dissect:<version>` and `:latest`. `latest` is not a
 contract — the version tag is.
 
+The release notes are the annotated tag message, mirrored in `CHANGELOG.md` with the digest once
+it is published. **A tag is never pushed again, not even to fix its message:** that runs the
+release again and can publish the same version under another digest. A wrong line is corrected
+in `CHANGELOG.md` as an erratum saying what the tag claims and what is true.
+
 Secret scanning runs in four layers (`.githooks/` plus `.github/workflows/gitleaks.yml`);
 activate the hooks once per clone with `git config core.hooksPath .githooks`.
 
