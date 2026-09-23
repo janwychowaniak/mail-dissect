@@ -295,12 +295,12 @@ instead:
 
 ```bash
 # On a machine that can pull. BY TAG, never by image ID.
-docker save ghcr.io/janwychowaniak/mail-dissect:0.1.1 apache/tika:3.2.3.0   gotenberg/gotenberg:8.37.0 -o mail-dissect-bundle.tar
+docker save ghcr.io/janwychowaniak/mail-dissect:0.2.0 apache/tika:3.2.3.0   gotenberg/gotenberg:8.37.0 -o mail-dissect-bundle.tar
 sha256sum mail-dissect-bundle.tar        # compare this on the other side
 
 # On the target host.
 docker load -i mail-dissect-bundle.tar
-docker image inspect ghcr.io/janwychowaniak/mail-dissect:0.1.1 --format '{{.RepoTags}}'
+docker image inspect ghcr.io/janwychowaniak/mail-dissect:0.2.0 --format '{{.RepoTags}}'
 ```
 
 **`docker save <image id>` produces an archive that loads with no tags at all**, and an
