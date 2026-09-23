@@ -26,11 +26,18 @@
 ## Source of truth
 
 `docs/SPEC.md` is the specification. Decisions are numbered `[D#]` there and cited from code
-comments and test docstrings. Measured standard-library behaviour lives in
-`docs/research/NOTES.md` as `F#`, produced by `docs/research/probes/`. Where the notes and the
-spec disagree, the spec wins — the notes record what the world does, the spec records what we
-decided. `docs/spec-coverage.md` maps every requirement and acceptance case to its section and
-its test; a row without a test is a promise nobody checks.
+comments and test docstrings. Measured behaviour — of the standard library, the dependencies
+and the tools — lives in `docs/research/NOTES.md` as `F#`, each saying how it was measured,
+most of them by a script in `docs/research/probes/`. Where the notes and the spec disagree, the
+spec wins — the notes record what the world does, the spec records what we decided.
+`docs/spec-coverage.md` maps every requirement and acceptance case to its section and its test;
+a row without a test is a promise nobody checks.
+
+**An identifier is written down before anything cites it.** `F11` and `F12` were cited from
+code for a whole release and existed nowhere else, and `[R1]`/`[R6]` were cited from the spec
+and defined nowhere; a number that points at nothing looks like evidence and is worse than
+none. Numbers are never reassigned or reused: a finding that turns out wrong is corrected under
+its own number, and a gap (there is no F9) stays a gap.
 
 Defects are reported against `docs/SPEC.md` — its contract and its decision numbers.
 
@@ -145,7 +152,10 @@ zero that read as a result during this project:
 - **`pkill -f <pattern>`** matches full command lines, so it matches the shell that launched
   it and kills itself mid-script. Record the PID at start (`command & echo $!`) and kill that.
 - **`cmd | tail -1`** returns `tail`'s exit status, so a failing `cmd` passes an `&&` chain.
-  Two files went out unformatted behind a gate that reported success.
+  Two files went out unformatted behind a gate that reported success. The same pipe cuts the
+  other way: `git push … | grep -E '->…'` died with its filter — `grep` was an alias for
+  ugrep, which read `->` as an option — SIGPIPE took the push with it, and the script carried
+  on. Redirect to a file and check the outcome (`git status -sb`) instead of filtering it.
 - **`docker run -v "$PWD/file.py:/app.py"`** silently creates a **directory** when the source
   file does not exist, and the container then fails for a reason that looks unrelated.
 - **`gh run watch <id>` with its output discarded** returned at once while the runs were still
@@ -174,6 +184,18 @@ Tags are `v*` and must equal `pyproject.version`; CI hard-fails otherwise. The r
 publishes `ghcr.io/janwychowaniak/mail-dissect:<version>` and `:latest`. `latest` is not a
 contract — the version tag is.
 
+**What the version number says.** A patch fixes a defect and leaves the contract as it was
+(0.1.1). A minor release changes behaviour a consumer can see within `/v1` — which inputs raise
+a flag, say — without extending a closed set (0.2.0); calling that a patch would misdescribe it.
+Extending a closed set is `/v2`. `1.0.0` is released when the consumer says so `[D16]`.
+
+**Every release, in this order:** the notes list what changes in behaviour, measured by running
+the same inputs on the previous version and on this one rather than derived from the diff; the
+tag goes out only after CI is green on the commit it points at; the digest is read from two
+places that must agree — the release workflow's push and a pull of the tag — and recorded in the
+README and `CHANGELOG.md`; and the published image is run against the previous one on an input
+from each line of the notes, the previous version being the control.
+
 The release notes are the annotated tag message, mirrored in `CHANGELOG.md` with the digest once
 it is published. **A tag is never pushed again, not even to fix its message:** that runs the
 release again and can publish the same version under another digest. A wrong line is corrected
@@ -198,7 +220,10 @@ The full record is `docs/SPEC.md` §22. The ones most likely to be "improved" by
 - **[D9]** the observables collector is append-only and scans headers → text → HTML → document
   texts, so the deterministic core of the list does not move when a tool is absent.
 - **[D15]** HTML is parsed with the standard library; do not reach for `lxml` for "robustness".
-- **[D20]** scrubbing an unserialisable string is reported as `encoding_fallback`, never silent.
+- **[D20]**, SPEC §5.1: `encoding_fallback` fires when, and only when, a declared charset was
+  not taken or something was substituted. A scrub that loses nothing — raw UTF-8 in an address
+  — is not reported. Flagging every scrub looks like diligence and is the same mistake as `[D23]`:
+  a flag that fires where nothing happened teaches its consumer to ignore it.
 - **[D21]** only the ICANN section of the public suffix list is loaded; adding the PRIVATE
   section looks like completeness and silently stops `github.io` and `blogspot.com` from being
   domains at all.

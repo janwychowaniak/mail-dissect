@@ -915,7 +915,7 @@ corpus hits that by accident, if at all. A synthetic message aims at a specific 
 is repeatable.
 
 The suite is **offline by default** — no network, no dependency reachable — and CI depends on
-that. Sixty-five numbered acceptance cases are listed in
+that. Sixty-six numbered acceptance cases are listed in
 [`spec-coverage.md`](spec-coverage.md), each mapped to the section it exercises.
 
 **Resilience is a separate species of test:** a correct synthetic message is damaged
