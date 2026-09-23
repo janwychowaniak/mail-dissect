@@ -222,5 +222,12 @@ def scrub_surrogates(value: str) -> tuple[str, bool]:
     try:
         value.encode("utf-8")
     except UnicodeEncodeError:
-        return value.encode("utf-8", "replace").decode("utf-8"), True
+        try:
+            # A lone surrogate is an 8-bit byte the parser escaped. Reading the bytes back as
+            # UTF-8, U+FFFD where that fails, is what the header registry does with the same
+            # bytes, so a header and the address decomposed from it agree about one byte (F17).
+            cleaned = value.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
+        except UnicodeEncodeError:
+            cleaned = value.encode("utf-8", "replace").decode("utf-8")
+        return cleaned, True
     return value, False

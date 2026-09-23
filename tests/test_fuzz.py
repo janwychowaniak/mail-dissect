@@ -132,6 +132,60 @@ def test_saved_findings_stay_fixed(client: TestClient, path: Path) -> None:
     _check(client, path.read_bytes(), path.name, 30.0)
 
 
+# Every place a header value is read from, top level and part alike, each with a byte above
+# 0x7F where `{X}` stands (F17). A mutator lands on these by chance; this lands on each one.
+_TOP_LEVEL_HEADERS = {
+    "subject": b"Subject: caf{X}",
+    "from": b"From: Caf{X} <a@example.com>",
+    "to": b"To: {X}v@x.example",
+    "received": b"Received: from caf{X}.example (h [10.0.0.1]) by mx.example; 1 Jan 2024",
+    "auth": b"Authentication-Results: mx.example; spf=pass smtp.mailfrom=caf{X}.example",
+    "charset": b"Content-Type: text/plain; charset=caf{X}",
+}
+_PART_HEADERS = {
+    "part-type": b"Content-Type: application/x-caf{X}",
+    "part-name": b'Content-Type: application/octet-stream; name="caf{X}.bin"',
+    "part-id": b"Content-ID: <caf{X}@x>",
+    "part-cte": b"Content-Transfer-Encoding: 7bit{X}",
+    "part-filename": b'Content-Disposition: attachment; filename="caf{X}.txt"',
+    "part-disposition": b"Content-Disposition: attach{X}ment",
+}
+
+
+def _at_top_level(line: bytes) -> bytes:
+    return b"Message-ID: <m@x>\r\n" + line + b"\r\n\r\nbody https://example.net/x\r\n"
+
+
+def _in_a_part(line: bytes) -> bytes:
+    default_type = b"Content-Type: application/octet-stream\r\n"
+    return (
+        b"Message-ID: <m@x>\r\nContent-Type: multipart/mixed; boundary=BB\r\n\r\n"
+        b"--BB\r\nContent-Type: text/plain\r\n\r\nbody\r\n--BB\r\n"
+        + (b"" if line.startswith(b"Content-Type") else default_type)
+        + line
+        + b"\r\n\r\npayload\r\n--BB--\r\n"
+    )
+
+
+_HEADER_PLACES = {name: _at_top_level(line) for name, line in _TOP_LEVEL_HEADERS.items()} | {
+    name: _in_a_part(line) for name, line in _PART_HEADERS.items()
+}
+
+
+@pytest.mark.parametrize("byte", [b"\xe9", "é".encode()], ids=["8-bit", "utf-8"])
+@pytest.mark.parametrize("place", sorted(_HEADER_PLACES))
+def test_a_non_ascii_byte_in_any_header_is_dissected(
+    client: TestClient, place: str, byte: bytes
+) -> None:
+    """F17: the byte reached code that expected a string, or a serialisable one, in each place.
+
+    Stricter than `_check`: the message is well-formed, so the answer is a dissection, never
+    a refusal.
+    """
+    body = dissect(client, _HEADER_PLACES[place].replace(b"{X}", byte))
+    DissectResponse.model_validate(body)
+
+
 def test_a_message_that_is_not_one_is_refused(client: TestClient) -> None:
     """The boundary the fuzzer leans on: below it, refusal; above it, flags."""
     response = client.post(

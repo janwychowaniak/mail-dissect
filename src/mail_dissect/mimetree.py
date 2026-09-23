@@ -13,12 +13,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from email.message import Message
 from email.parser import BytesParser
-from email.policy import compat32
 from io import BytesIO
 
 from . import spans
 from .decode import Hashes, TextResult, decode_text, decode_transfer, hash_bytes
-from .headers import filename_of
+from .headers import COMPAT32_TEXT, filename_of
 from .sniff import detect_mime
 
 
@@ -69,7 +68,7 @@ def parse_tree(raw: bytes, *, max_attachment_bytes: int, max_parts: int) -> Tree
         raw = spans.cut_to_part_limit(raw, max_parts)
         tree.flags.add("truncated")
         tree.cut = True
-    message = BytesParser(policy=compat32).parsebytes(raw)
+    message = BytesParser(policy=COMPAT32_TEXT).parsebytes(raw)
     _visit(message, raw, _root_region(raw), tree, max_attachment_bytes, max_parts)
 
     for info in tree.parts:
@@ -196,7 +195,7 @@ def _verifies(located: bytes, part: Message) -> bool:
     if not isinstance(expected, Message):
         return False
     try:
-        actual = BytesParser(policy=compat32).parsebytes(located)
+        actual = BytesParser(policy=COMPAT32_TEXT).parsebytes(located)
     except Exception:
         return False
     if actual.get_content_type() != expected.get_content_type():

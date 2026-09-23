@@ -8,9 +8,12 @@ rather than only which seed did it.
 from __future__ import annotations
 
 import random
+import re
 from collections.abc import Callable
 
 Mutator = Callable[[bytes, random.Random], bytes]
+
+_HEADER_LINE = re.compile(rb"^[A-Za-z0-9-]+:")
 
 
 def truncate(raw: bytes, rng: random.Random) -> bytes:
@@ -110,6 +113,25 @@ def control_bytes(raw: bytes, rng: random.Random) -> bytes:
     return bytes(data)
 
 
+def non_ascii_header_bytes(raw: bytes, rng: random.Random) -> bytes:
+    """Put bytes above 0x7F into header values: a lone 8-bit byte, or UTF-8 (F17).
+
+    Any header line, the message's or a part's, because the two are read by different code.
+    `control_bytes` stops at 0x7F, and one byte past it was a 500 in any header of a message.
+    """
+    lines = raw.split(b"\r\n")
+    headers = [index for index, line in enumerate(lines) if _HEADER_LINE.match(line)]
+    if not headers:
+        return raw
+    for _ in range(rng.randrange(1, 4)):
+        index = rng.choice(headers)
+        line = lines[index]
+        position = rng.randrange(line.index(b":") + 1, len(line) + 1)
+        byte = rng.choice([bytes([rng.randrange(0x80, 0x100)]), "é".encode(), "€".encode()])
+        lines[index] = line[:position] + byte + line[position:]
+    return b"\r\n".join(lines)
+
+
 def mixed_line_endings(raw: bytes, rng: random.Random) -> bytes:
     parts = raw.split(b"\r\n")
     return (
@@ -131,6 +153,7 @@ MUTATORS: tuple[Mutator, ...] = (
     deep_nesting,
     very_long_line,
     control_bytes,
+    non_ascii_header_bytes,
     mixed_line_endings,
 )
 

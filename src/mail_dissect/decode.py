@@ -134,7 +134,9 @@ def decode_text(data: bytes, declared: str | None, *, is_html: bool = False) -> 
     for candidate in candidates:
         try:
             codec_info = codecs.lookup(candidate)
-        except LookupError:
+        except (LookupError, ValueError):
+            # A name the lookup cannot even read - a lone surrogate from an 8-bit byte, a NUL
+            # - raises ValueError rather than LookupError, and is just as unresolvable (F17).
             continue
         try:
             text = data.decode(codec_info.name)
@@ -153,5 +155,5 @@ def _canonical(name: str | None) -> str | None:
         return None
     try:
         return codecs.lookup(name).name
-    except LookupError:
+    except (LookupError, ValueError):
         return name

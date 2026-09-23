@@ -678,8 +678,9 @@ reported as a full one would be a silent failure.
 ### 14.1 `TIKA_URL` — text extraction from documents
 
 - **Call:** `PUT <TIKA_URL>` with the attachment bytes in the body, `Accept: text/plain`,
-  `Content-Type` = the attachment's type. This is the Apache Tika Server protocol and the
-  `apache/tika` image works with no adapter.
+  `Content-Type` = the attachment's type — the declared one, or the detected one when the
+  declared type is not a `token/token` a request header can carry. This is the Apache Tika
+  Server protocol and the `apache/tika` image works with no adapter.
 - **What is sent:** only attachments of document types (PDF, office formats, RTF,
   OpenDocument) — not images, not archives, not executables. Size and time limits from
   configuration.
@@ -909,7 +910,7 @@ programmatically and the service is required not to fall over. Mutations cover a
 truncation at a random offset, removed and duplicated headers, a header with no colon and no
 value, broken `base64` and `quoted-printable`, a charset declaration disagreeing with content,
 missing and mismatched `boundary`, empty parts, nesting deeper than the limit, very long lines,
-control characters and a NUL byte, mixed `CRLF` and `LF`.
+control characters and a NUL byte, bytes above 0x7F in header values, mixed `CRLF` and `LF`.
 
 The criterion is single and hard: **no mutation may raise an unhandled exception or exceed the
 time limit.** Acceptable outcomes are a correct response (however poor, with `malformed_mime`

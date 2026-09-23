@@ -1,0 +1,14 @@
+From: sender@example.net
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=BB
+
+--BB
+Content-Type: text/plain
+
+body
+--BB
+Content-Type: application/octet-stream
+Content-ID: <café@example.net>
+
+payload
+--BB--

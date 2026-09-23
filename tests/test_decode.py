@@ -23,6 +23,9 @@ from mail_dissect.decode import decode_text, decode_transfer, hash_bytes
         ("zażółć".encode("iso-8859-2"), "utf-8", "za¿ó³æ", "cp1252", True),
         # A charset nobody has heard of is not a reason to lose the text.
         (b"plain", "x-nonsense", "plain", "utf-8", True),
+        # Nor is one the lookup cannot even read: it raises ValueError, not LookupError (F17).
+        (b"plain", "caf\udce9", "plain", "utf-8", True),
+        (b"plain", "utf\x00", "plain", "utf-8", True),
         (b'"utf-8"', None, '"utf-8"', "utf-8", False),
     ],
 )

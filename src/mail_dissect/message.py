@@ -34,6 +34,7 @@ class ParsedMessage:
     auth: list[AuthResult] = field(default_factory=list)
     received: list[Hop] = field(default_factory=list)
     tree: Tree = field(default_factory=Tree)
+    flags: set[str] = field(default_factory=set)
 
 
 @dataclass(slots=True)
@@ -48,7 +49,9 @@ def parse_message(
     """Dissect one message. The top-level message is dissected exactly like a nested one."""
     parsed = ParsedMessage(index=index, depth=depth, raw=raw)
     header_block = _header_block(raw)
-    parsed.headers = header_map(header_block)
+    parsed.headers, substituted = header_map(header_block)
+    if substituted:
+        parsed.flags.add("encoding_fallback")
     parsed.addresses = addresses_of(header_block)
     parsed.received = [parse_received(value) for value in parsed.headers.get("received", [])]
     for value in parsed.headers.get("authentication-results", []):
@@ -93,7 +96,7 @@ def dissect_messages(
             max_parts=remaining,
         )
         result.messages.append(message)
-        result.flags |= message.tree.flags
+        result.flags |= message.tree.flags | message.flags
         remaining -= len(message.tree.parts)
 
         if depth >= max_depth:

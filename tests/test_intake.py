@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 
+import pytest
 from conftest import SIMPLE, dissect, mask_environment
 from fastapi.testclient import TestClient
 
@@ -124,6 +125,80 @@ def test_headers_are_complete_and_ordered(client: TestClient) -> None:
     assert headers["x-custom"] == ["first"]
     assert headers["subject"] == ["café"]  # RFC 2047 decoded through the registry (F7)
     assert set(headers) == {"from", "received", "x-custom", "subject"}
+
+
+def test_an_eight_bit_header_byte_is_replaced_and_reported(client: TestClient) -> None:
+    """[D20], F7: one byte above 0x7F in a header is a substitution, and it is said out loud.
+
+    Until F17 this was a 500 for any header at all: compat32 handed the value out as an
+    `email.header.Header`, which nothing downstream expects. The ASCII twin is the control -
+    the same message on the same path, differing in the one byte - so the flag is raised by
+    that byte and not by the shape of the message. The address is checked as well as the
+    header, because the two are cleaned by different code and must not disagree.
+    """
+    twin = dissect(client, b"From: a@example.com\r\nTo: ev@x.example\r\nSubject: cafe\r\n\r\nb")
+    assert twin["messages"][0]["headers"]["subject"] == ["cafe"]
+    assert twin["flags"] == []
+
+    body = dissect(
+        client, b"From: a@example.com\r\nTo: \xe9v@x.example\r\nSubject: caf\xe9\r\n\r\nb"
+    )
+    message = body["messages"][0]
+    assert message["headers"]["subject"] == ["caf\ufffd"]
+    assert message["headers"]["to"] == ["\ufffdv@x.example"]
+    assert message["addresses"]["to"][0]["address"] == "\ufffdv@x.example"
+    assert body["flags"] == ["encoding_fallback"]
+
+
+@pytest.mark.parametrize(
+    ("header", "expected", "flags"),
+    [
+        # Raw UTF-8 (RFC 6532) reads without loss, so nothing was substituted.
+        ("Subject: café".encode(), "café", []),
+        # A broken encoded-word is the other way to a U+FFFD, and F7 promised the flag for it.
+        (b"Subject: =?utf-8?q?caf=E9?=", "caf\ufffd", ["encoding_fallback"]),
+        (b"Subject: =?utf-8?q?caf=C3=A9?=", "café", []),
+        # A U+FFFD the sender wrote is material, not a substitution.
+        ("Subject: caf\ufffd".encode(), "caf\ufffd", []),
+    ],
+)
+def test_a_header_is_flagged_only_for_what_decoding_replaced(
+    client: TestClient, header: bytes, expected: str, flags: list[str]
+) -> None:
+    body = dissect(client, b"From: a@example.com\r\n" + header + b"\r\n\r\nb")
+    assert body["messages"][0]["headers"]["subject"] == [expected]
+    assert body["flags"] == flags
+
+
+def test_an_eight_bit_byte_in_a_part_header_is_replaced_and_reported(client: TestClient) -> None:
+    """[D20], F17: the part's fields are read out of headers too, and served back by name.
+
+    `content_id` and the filename reached the JSON encoder unscrubbed, and the filename would
+    have reached `Content-Disposition` when the attachment is fetched. The twin is the control.
+    """
+
+    def with_byte(byte: bytes) -> bytes:
+        return (
+            b"From: a@example.com\r\nContent-Type: multipart/mixed; boundary=BB\r\n\r\n"
+            b"--BB\r\nContent-Type: text/plain\r\n\r\nbody\r\n--BB\r\n"
+            b"Content-Type: application/octet-stream\r\nContent-ID: <caf" + byte + b"@x>\r\n"
+            b'Content-Disposition: attachment; filename="caf' + byte + b'.bin"\r\n'
+            b"\r\npayload\r\n--BB--\r\n"
+        )
+
+    twin = dissect(client, with_byte(b"e"))
+    assert twin["messages"][0]["mime_parts"][2]["content_id"] == "<cafe@x>"
+    assert twin["flags"] == []
+
+    body = dissect(client, with_byte(b"\xe9"))
+    assert body["messages"][0]["mime_parts"][2]["content_id"] == "<caf\ufffd@x>"
+    assert body["messages"][0]["mime_parts"][2]["filename"] == "caf\ufffd.bin"
+    assert body["flags"] == ["encoding_fallback"]
+    attachment = next(a for a in body["artifacts"] if a["kind"] == "attachment")
+    assert attachment["filename"] == "caf\ufffd.bin"
+    fetched = client.get(f"/v1/artifact/{body['dissect_id']}/{attachment['artifact_id']}")
+    assert fetched.status_code == 200
+    assert fetched.content == b"payload"
 
 
 def test_source_hashes_are_of_the_message_bytes(client: TestClient) -> None:

@@ -2,7 +2,7 @@
 
 Run:  python3.13 docs/research/probes/email_stdlib.py
 
-Findings F1 to F10 in ../NOTES.md are produced by one function each here. The probes are
+Findings F1 to F10 and F17 in ../NOTES.md are produced by one function each here. The probes are
 read-only, offline, and depend on nothing but the standard library, so anyone
 can re-run them against a newer interpreter and see whether a finding still
 holds. Print output is the evidence; keep it terse enough to paste.
@@ -303,6 +303,37 @@ def f10_html_parser_survives_hostile_input() -> None:
         print(f"{label:22s} {time.perf_counter() - start:6.2f}s  {note}")
 
 
+def f17_compat32_hands_out_a_header_object() -> None:
+    """What `compat32`, the policy the tree is read with, returns for an 8-bit header value."""
+    _banner("F17", "an 8-bit header value under compat32, and what reads it afterwards")
+    import codecs
+
+    raw = b"X-Ok: cafe\r\nSubject: caf\xe9\r\nTo: \xe9v@x.example\r\n\r\nbody\r\n"
+    for label, policy in (("compat32", email.policy.compat32), ("default", email.policy.default)):
+        msg = message_from_bytes(raw, policy=policy)
+        for name in ("X-Ok", "Subject", "To"):
+            value = msg[name]
+            kind = type(value).__name__
+            where = f"msg[{name!r}]"
+            print(f"{label:9s} {where:15s} {kind:26s} is str: {isinstance(value, str)}")
+    stored = dict(message_from_bytes(raw, policy=email.policy.compat32).raw_items())["Subject"]
+    print(f"compat32 raw_items() Subject: {stored!r}")
+    registry = HeaderRegistry()
+    for label, value in (
+        ("8-bit byte", "caf\udce9"),
+        ("raw UTF-8", "caf\udcc3\udca9"),
+        ("encoded-word, bad UTF-8", "=?utf-8?q?caf=E9?="),
+    ):
+        header = registry("subject", value)
+        print(f"registry {label:24s} -> {str(header)!r}  defects={len(header.defects)}")
+    for name in ("caf\udce9", "utf\x00", "x-nonsense"):
+        try:
+            result = codecs.lookup(name).name
+        except Exception as exc:
+            result = f"{type(exc).__name__} (a LookupError: {isinstance(exc, LookupError)})"
+        print(f"codecs.lookup({name!r}) -> {result}")
+
+
 def main() -> int:
     print(f"python {sys.version}")
     f1_nested_reserialisation_is_not_byte_identical()
@@ -315,6 +346,7 @@ def main() -> int:
     f7_rfc2047_decoding_paths()
     f8_broken_encodings_do_not_raise()
     f10_html_parser_survives_hostile_input()
+    f17_compat32_hands_out_a_header_object()
     return 0
 
 

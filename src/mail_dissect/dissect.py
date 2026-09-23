@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import re
 from dataclasses import dataclass, field
 
 import httpx
@@ -48,6 +49,9 @@ from .urls import UrlParts, split
 
 MAX_TOOL_CONCURRENCY = 4
 
+# `token "/" token` (RFC 9110): the only shape of media type a request header carries as it is.
+_MEDIA_TYPE = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+/[!#$%&'*+.^_`|~0-9A-Za-z-]+")
+
 _FLAG_ORDER: tuple[Flag, ...] = (
     "truncated",
     "malformed_mime",
@@ -86,7 +90,8 @@ class _Assembly:
             data,
             message_index=message_index,
             part_index=part_index,
-            filename=filename,
+            # The sender's name is served back in Content-Disposition as well as listed here.
+            filename=self.text(filename),
             mime=mime,
         )
         if reference is None:
@@ -193,7 +198,9 @@ async def _extract_document_text(
                 return item, info, None, "timeout"
             assert info.payload is not None
             text, state = await tika.extract(
-                info.payload, info.content_type, deadline.budget(settings.tika_timeout_seconds)
+                info.payload,
+                _type_for_the_extractor(info),
+                deadline.budget(settings.tika_timeout_seconds),
             )
             return item, info, text, state
 
@@ -221,6 +228,19 @@ async def _extract_document_text(
             if attachment.part_index == info.index:
                 attachment.text_artifact_id = artifact_id
         item.collector.feed_text(text, Source(kind="attachment", part_index=info.index))
+
+
+def _type_for_the_extractor(info: PartInfo) -> str:
+    """The attachment's declared type (SPEC §14.1), unless a request header cannot carry it.
+
+    A declared type with a byte above 0x7F in it made the request raise before it was sent, a
+    500 (F17), and one with a control character gets a 400 from the tool, which reads as `down`
+    when the fault was ours. Neither is a media type, so neither is what made the part a
+    document: the detected type did, and it goes instead.
+    """
+    if _MEDIA_TYPE.fullmatch(info.content_type):
+        return info.content_type
+    return info.detected_mime or "application/octet-stream"
 
 
 def _is_extractable(info: PartInfo) -> bool:
@@ -415,15 +435,19 @@ def _scan_observables(
 
 
 def _build_part(info: PartInfo, assembly: _Assembly) -> MimePartOut:
+    # Every string here was read out of a header, so every one of them can carry a lone
+    # surrogate from an 8-bit byte, and a single one unscrubbed is a 500 `[D20]`.
     return MimePartOut(
-        content_type=info.content_type,
-        disposition=info.disposition,
+        content_type=assembly.text(info.content_type),
+        disposition=assembly.text(info.disposition) if info.disposition else None,
         filename=assembly.text(info.filename) if info.filename else None,
-        content_id=info.content_id,
+        content_id=assembly.text(info.content_id) if info.content_id else None,
         size=info.size,
-        charset_declared=info.charset_declared,
+        charset_declared=assembly.text(info.charset_declared) if info.charset_declared else None,
         charset_used=info.charset_used,
-        transfer_encoding=info.transfer_encoding,
+        transfer_encoding=(
+            assembly.text(info.transfer_encoding) if info.transfer_encoding else None
+        ),
     )
 
 
@@ -447,9 +471,9 @@ def _build_attachment(info: PartInfo, assembly: _Assembly, message_index: int) -
         text_artifact_id=None,  # filled in stage 5, when the text extractor is wired
         filename=name,
         extension=extension,
-        disposition=info.disposition,
-        content_id=info.content_id,
-        declared_mime=info.content_type,
+        disposition=assembly.text(info.disposition) if info.disposition else None,
+        content_id=assembly.text(info.content_id) if info.content_id else None,
+        declared_mime=assembly.text(info.content_type),
         detected_mime=info.detected_mime,
         size=info.size,
         md5=info.hashes.md5 if info.hashes else None,

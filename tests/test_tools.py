@@ -5,6 +5,7 @@ Acceptance cases 13, 52, 53, 54, 58, 59, 62.
 
 from __future__ import annotations
 
+import base64
 from collections.abc import Callable
 
 import builders as b
@@ -119,6 +120,46 @@ def test_working_text_extractor(settings: Settings, clock: FakeClock) -> None:
             "part_index": attachment["part_index"],
         }
     ]
+
+
+@pytest.mark.parametrize(
+    ("declared", "sent"),
+    [
+        # The control: a declared type that differs from the detected one goes as declared.
+        (b"application/msword", "application/msword"),
+        (b"application/x-caf\xe9", "application/pdf"),
+        ("application/x-café".encode(), "application/pdf"),
+        (b"application/x-\x01", "application/pdf"),
+    ],
+    ids=["declared", "8-bit", "utf-8", "control-character"],
+)
+def test_the_extractor_gets_a_type_a_header_can_carry(
+    settings: Settings, clock: FakeClock, declared: bytes, sent: str
+) -> None:
+    """F17: a declared type that cannot stand in a request header gives way to the detected one.
+
+    Sent as declared, the first two raised inside the HTTP client and the dissection was a
+    500; the last one got a 400 from a real Tika, which reads as the tool being `down`.
+    """
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, text="text")
+
+    raw = (
+        b"From: a@example.com\r\nContent-Type: multipart/mixed; boundary=BB\r\n\r\n"
+        b"--BB\r\nContent-Type: text/plain\r\n\r\nbody\r\n--BB\r\n"
+        b"Content-Type: "
+        + declared
+        + b"\r\nContent-Transfer-Encoding: base64\r\n\r\n"
+        + base64.b64encode(PDF)
+        + b"\r\n--BB--\r\n"
+    )
+    with _with_tools(settings, clock, handler, screenshot_url="") as client:
+        body = dissect(client, raw)
+    assert body["tools"]["tika"] == "ok"
+    assert [call.headers["content-type"] for call in calls] == [sent]
 
 
 def test_only_documents_are_sent(settings: Settings, clock: FakeClock) -> None:

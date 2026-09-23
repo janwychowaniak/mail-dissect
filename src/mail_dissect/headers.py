@@ -13,7 +13,24 @@ from dataclasses import dataclass
 from email.headerregistry import AddressHeader, HeaderRegistry, UniqueAddressHeader
 from email.message import Message
 from email.parser import BytesHeaderParser
-from email.policy import compat32
+from email.policy import Compat32
+
+
+class _Compat32Text(Compat32):
+    """`compat32` that hands every header value out as the string it was parsed into.
+
+    Stock `compat32` wraps a value holding 8-bit bytes in an `email.header.Header` (F17), and
+    nothing here expects one: it reached `.strip()` and a regex, and one byte above 0x7F in any
+    header of a message was a 500. As a string the bytes stay lone surrogates, which is the
+    shape `[D20]` scrubs at the response boundary and reports as `encoding_fallback`. Only
+    fetching changes; parsing is compat32's own, so `[D11]` holds.
+    """
+
+    def header_fetch_parse(self, name: str, value: str) -> str:
+        return value
+
+
+COMPAT32_TEXT = _Compat32Text()
 
 ADDRESS_HEADERS = (
     "from",
@@ -48,17 +65,33 @@ def decode_value(name: str, value: str) -> str:
         return value
 
 
-def header_map(raw: bytes) -> dict[str, list[str]]:
+def header_map(raw: bytes) -> tuple[dict[str, list[str]], bool]:
     """Every header, names lowercased, values in order of appearance (SPEC §7).
 
     No selection: `headers` returns all of them, because choosing which matter is the
-    consumer's business.
+    consumer's business. The second value says whether decoding substituted anything: the
+    registry puts U+FFFD where bytes do not decode, an 8-bit byte or a broken encoded-word
+    alike, and says nothing (F7, F17), so the substitution is counted here and reported as
+    `encoding_fallback` (SPEC §7.2).
     """
-    message = BytesHeaderParser(policy=compat32).parsebytes(raw)
+    message = BytesHeaderParser(policy=COMPAT32_TEXT).parsebytes(raw)
     result: dict[str, list[str]] = {}
+    substituted = False
     for name, value in message.items():
-        result.setdefault(name.lower(), []).append(decode_value(name, value))
-    return result
+        decoded = decode_value(name, value)
+        substituted = substituted or _substituted(value, decoded)
+        result.setdefault(name.lower(), []).append(decoded)
+    return result, substituted
+
+
+def _substituted(value: str, decoded: str) -> bool:
+    """Whether `decoded` has a U+FFFD that the sender did not write.
+
+    A U+FFFD the sender did write arrives either as the character itself or, in a raw 8-bit
+    header, as its three UTF-8 bytes escaped to surrogates; both are counted as written.
+    """
+    written = value.count("\ufffd") + value.count("\udcef\udcbf\udcbd")
+    return decoded.count("\ufffd") > written
 
 
 def filename_of(part: Message) -> str | None:
@@ -118,7 +151,7 @@ def addresses_of(raw: bytes) -> dict[str, list[Address]]:
     Not a chosen three: decomposing one costs the same as decomposing all of them, and
     choosing would be a decision about which headers matter.
     """
-    message = BytesHeaderParser(policy=compat32).parsebytes(raw)
+    message = BytesHeaderParser(policy=COMPAT32_TEXT).parsebytes(raw)
     result: dict[str, list[Address]] = {}
     for name, value in message.items():
         lowered = name.lower()

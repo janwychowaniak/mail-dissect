@@ -1,11 +1,11 @@
 # Research notes — CPython `email`, the dependencies, the tools
 
-F1–F10 were probed **2026-09-17** on **CPython 3.13.12** with
+F1–F10 were probed **2026-09-17** and F17 **2026-09-23**, on **CPython 3.13.12** with
 [`probes/email_stdlib.py`](probes/email_stdlib.py), which needs nothing but the standard
-library, and F11–F12 on **2026-09-23** with [`probes/dependencies.py`](probes/dependencies.py)
+library; F11–F12 on **2026-09-23** with [`probes/dependencies.py`](probes/dependencies.py)
 against the versions in `uv.lock`. Each of them is printed by one function in its script; re-run
 the script against a newer interpreter or dependency to see whether a finding still holds. Both
-scripts are offline and read-only. From F13 on, each finding says how it was measured.
+scripts are offline and read-only. F13 to F16 each say how they were measured.
 
 These notes feed [`../SPEC.md`](../SPEC.md). Where something is a **decision**, the spec
 wins; this file records only **what the standard library, the dependencies and the tools
@@ -35,6 +35,9 @@ number, as F15 was.
   `malformed_mime` therefore need definitions of our own, not a defect check. (F8)
 - `html.parser` survives every hostile HTML shape tried, sub-second, without raising. Hence
   `[D15]` (no C extension for the one input class guaranteed to be hostile). (F10)
+- Under `compat32` a header value holding an 8-bit byte is an `email.header.Header`, not a
+  string, while F5 was measured under `policy.default`. Hence `COMPAT32_TEXT`, and the count of
+  what the registry replaced silently behind `encoding_fallback`. (F17)
 
 ---
 
@@ -385,3 +388,45 @@ exit status ignored. Verify between steps that the removal actually removed some
 Whether the containerd image store behaves differently is untested. The practical answer does
 not depend on it: compare the **checksum of the archive** on both sides, since that is the
 artifact both sides actually hold.
+
+## F17 — `compat32` hands an 8-bit header value out as a `Header`, not a string
+
+| Policy | `msg["X-Ok"]`, ASCII (control) | `msg["Subject"]`, `msg["To"]`, one byte `\xe9` |
+| --- | --- | --- |
+| `compat32` | `str` | **`email.header.Header`**, not a `str` |
+| `policy.default` | a header object that is a `str` | a header object that is a `str` |
+
+`raw_items()` holds the value as a string with the byte escaped to a lone surrogate
+(`'caf\udce9'`); only fetching wraps it, because `Compat32.header_fetch_parse` turns any value
+with a surrogate in it into a `Header`.
+
+F5 was measured under `policy.default`, where the value is a string and the lone surrogate
+reaches the JSON encoder, and `[D20]` was decided against that. The tree is read under
+`compat32` `[D11]`, where the value never became that string: it arrived as a `Header`, reached
+`.strip()` and a regular expression, and one byte above 0x7F in any header of a message was a
+500 before the encoder was ever involved. The decision was right; the measurement it rested on
+was taken on the other policy. Hence `COMPAT32_TEXT` in `src/mail_dissect/headers.py`: the
+fetch returns the stored string, and parsing stays `compat32`'s own.
+
+Two things read that string afterwards, and neither says what it did. The header registry reads
+the escaped bytes as UTF-8 and puts U+FFFD where that fails, without a defect:
+
+| `HeaderRegistry()("subject", value)` | Result | `defects` |
+| --- | --- | --- |
+| `'caf\udce9'`, an 8-bit byte | `'caf\ufffd'` | none |
+| `'caf\udcc3\udca9'`, raw UTF-8 | `'café'` | none |
+| `'=?utf-8?q?caf=E9?='`, an encoded-word of bad UTF-8 | `'caf\ufffd'` | none |
+
+F7 already said such a replacement is reported as `encoding_fallback`, and nothing raised it;
+the substitution is now counted where the headers are read. And `codecs.lookup` refuses a name
+it cannot read with a `ValueError` rather than a `LookupError` — `UnicodeEncodeError` for
+`'caf\udce9'`, `ValueError` for `'utf\x00'`, against `LookupError` for `'x-nonsense'` — so a
+`charset=` parameter carrying an 8-bit byte or a NUL fell out of the ladder of SPEC §7.2.
+
+The declared type also travels on, as the `Content-Type` of the request to the text extractor.
+Measured by hand with `httpx` 0.28.1 against `apache/tika:3.2.3.0`: a type with a byte above
+0x7F in it, surrogate or valid UTF-8 alike, raises `UnicodeEncodeError` before anything is sent,
+and that is not an `httpx.HTTPError`, so it escaped the client's handling as a 500; a type
+with a control character is sent and answered **400**, which the client reports as the tool
+being `down`. The control, `application/pdf`, reached the tool and was answered on its merits.
+
