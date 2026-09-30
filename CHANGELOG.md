@@ -9,6 +9,54 @@ and can publish the same version under a different digest, which breaks the one 
 pinned deployment stands on. A wrong line in a tag message is corrected here instead, as an
 erratum that says what the tag claims and what is true.
 
+## 0.3.0 — 2026-09-30
+
+`ghcr.io/janwychowaniak/mail-dissect@sha256:164d4efc570ee1a5b0103d0e806ac9e0af476793aada0406e4ea3c685181b2c5`
+
+A header is now unfolded before anything reads it (SPEC §7, `[D24]`). Where a header was broken
+across lines is not part of its value (RFC 5322 §2.2.3): the line break is removed and the white
+space after it is kept, whether the break is CRLF or a bare LF, in the headers of a message, of
+a part and of a nested message alike. Until now the break stayed in the value.
+
+`[D24]` also says what `headers{}` is: the parsed view of a header — unfolded, RFC 2047
+decoded, a structured header as the parser renders it — while the `headers` artifact is the
+record of how it was written. SPEC §7 names the structured headers.
+
+The `/v1` paths, fields and value sets are unchanged. What moves is what a **folded** header
+yields. Measured on the same inputs against 0.2.0:
+
+**Changes, for a folded header:**
+
+- `addresses`: an address header is decomposed; it was one entry of nulls. A list folded after
+  its comma yields every address.
+- `headers`: an address header is decoded and rendered; it was the raw value, encoded-words and
+  line break included
+- `headers`: any other header loses the line break and keeps the white space after it
+  (`Subject`, `Received`, `Authentication-Results`, …)
+- `headers`: two encoded-words either side of a fold are joined, as RFC 2047 §6.2 says; the
+  break and the white space stood between them
+- `headers`: `Content-Type` keeps its parameters; it ended at the semicolon
+- `observables`: candidates are read from the unfolded value, so a name cut between two
+  encoded-words is one candidate; its second half used to be reported as a candidate of its own
+- `flags`: an address header with an encoded-word that does not decode raises
+  `encoding_fallback`, as the same header on one line already did
+- `mime_parts`, `attachments`: `filename` and `content_id` no longer carry a line break that
+  was folded inside the value
+- `received`, `auth`: a `Received` timestamp, and a quoted parameter of
+  `Authentication-Results`, no longer carry a line break that was folded inside them. Every
+  other field of a hop or of a result is a single token and was already right.
+
+**Unchanged:**
+
+- a header written on one line: every response is identical
+- the MIME tree, the bodies, and the `eml` and `headers` artifacts, which carry the original
+  bytes, folds included
+
+Also in this release: the fuzzer folds header lines, and CI and the release workflow run the
+header expectations inside the image, on the interpreter that is published.
+
+Verified against `apache/tika:3.2.3.0` and `gotenberg/gotenberg:8.37.0`.
+
 ## 0.2.0 — 2026-09-23
 
 `ghcr.io/janwychowaniak/mail-dissect@sha256:5c6b8c13c2680f9bc43ab7d742ae7c05fdfa9326a99936e9605532bf7b8614bf`
