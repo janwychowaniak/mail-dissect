@@ -27,6 +27,12 @@ jobs:
       # DOCKER_BUILDKIT=0: the Dockerfile must stay buildable with the classic builder, so a
       # machine without BuildKit is never a surprise. Claiming it is not enough - CI checks.
       - run: DOCKER_BUILDKIT=0 docker build -t mail-dissect:ci .
+      # What `headers{}` returns is the standard library's parser at work [D24], and the image's
+      # Python is not the runner's. The directory is mounted, never a single file: docker
+      # creates a missing source path as a directory, and the run then fails for a reason that
+      # looks unrelated.
+      - name: The header pins hold on the interpreter the image ships
+        run: docker run --rm -v "$PWD/tests:/tests:ro" mail-dissect:ci python /tests/pins.py
       - name: The service answers its own contract
         run: |
           docker run -d --name md -p 127.0.0.1:8000:8000 mail-dissect:ci

@@ -41,10 +41,24 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      - name: Build
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           IMAGE="ghcr.io/${{ github.repository_owner }}/mail-dissect"
           DOCKER_BUILDKIT=0 docker build -t "$IMAGE:$VERSION" -t "$IMAGE:latest" .
+
+      # The base image is rebuilt under its tag, so this build may carry a newer Python than
+      # the one CI tested. What is read out of a header is that interpreter's parser [D24], so
+      # the pins run on the image about to be pushed, and nothing is pushed if they fail.
+      - name: The header pins hold on the interpreter being published
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          IMAGE="ghcr.io/${{ github.repository_owner }}/mail-dissect"
+          docker run --rm -v "$PWD/tests:/tests:ro" "$IMAGE:$VERSION" python /tests/pins.py
+
+      - name: Push
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          IMAGE="ghcr.io/${{ github.repository_owner }}/mail-dissect"
           docker push "$IMAGE:$VERSION"
           docker push "$IMAGE:latest"
