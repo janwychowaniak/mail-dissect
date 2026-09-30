@@ -45,7 +45,10 @@ Defects are reported against `docs/SPEC.md` — its contract and its decision nu
 
 A report arrives as three things, and each has somewhere to land:
 
-- a **minimal synthetic repro** — the structure reproduced, never anyone's content;
+- a **minimal synthetic repro** — the structure reproduced, never anyone's content. Synthetic
+  in its wording too: a name, a subject or a label that carries the reporter's scenario is
+  rewritten before the file lands, because a fixture is read by everyone and the structure is
+  all it is for;
 - a **control** — what the difference is visible on, and what shows the measurement reached
   the code at all rather than failing before it;
 - a **reference into the contract** — the `[D#]` or the acceptance case it concerns.
@@ -86,7 +89,16 @@ uv run pytest -q                        # offline; the socket guard is autouse
 uv run pytest -q --cov --cov-fail-under=90   # what CI gates on [D17]
 uv run pytest -q -m fuzz                # the long fuzz run, random seed
 DOCKER_BUILDKIT=0 docker build -t mail-dissect:dev .
+docker run --rm -v "$PWD/tests:/tests:ro" mail-dissect:dev python /tests/pins.py
 ```
+
+**The image's Python is not the developer's.** `python:3.13-slim-bookworm` is rebuilt under
+its tag, so the image carries whatever 3.13.x is current (3.13.15 when the suite ran on
+3.13.12), and what `headers{}` and `addresses{}` return is that interpreter's parser at work
+`[D24]`. `tests/pins.py` holds the expectations that depend on it — the header registry's map
+and the values of the saved messages — and needs nothing the image lacks, so the last line
+above runs them on the interpreter that ships. CI runs it in the `container` job and the
+release workflow runs it on the image it is about to push.
 
 **The tool contracts are checked against real images, by hand.** `tests/test_live_tools.py`
 never runs in CI — it needs two containers — and it exists because the fakes prove our side of
@@ -137,7 +149,9 @@ worth more than the list:
   string, and one such byte in any header of a message was a 500 for a whole release (F17).
   The measurement was true and the decision built on it was right; neither was about the thing
   that shipped. Measure on the configuration that runs — the policy, the image, the host — not
-  on the one next to it.
+  on the one next to it. It happened again with F18: F7 measured the header registry on values
+  written on one line, and `compat32` hands it folded ones, so every folded address header was
+  decomposed into nulls for three releases.
 
 **Mutation is a ritual of every stage, not a gesture.** Before a stage is pushed, pick its
 load-bearing behaviours, break each one in the source on purpose, and check that the tests
@@ -164,8 +178,12 @@ zero that read as a result during this project:
 - **`echo "$body"` in zsh** interprets backslash escapes, so the `\n` inside a JSON string
   becomes a newline and a valid response fails to parse — which reads as the service's fault.
   Write the body to a file (`curl -o`) and parse the file.
+- **An unquoted `$files` in zsh is one word**, not a list: `grep … $files` got a single
+  argument with newlines in it, exited with 2, and a scan for leaked wording read no file at
+  all. Feed file lists through `xargs`, and keep a positive control in the scan — a token that
+  is certainly there — so an empty result can be told from a scan that never ran.
 
-**Two fixture traps that will come back:**
+**Three fixture traps that will come back:**
 
 - **A byte-fidelity fixture must be deliberately non-canonical** — a refolded header, a
   `From:` with no space after the colon, LF instead of CRLF. A canonical message survives a
@@ -174,6 +192,12 @@ zero that read as a result during this project:
 - **A timing assertion must be far from both paths' real cost.** `elapsed < 2.0` could not
   tell a pre-parse cut from a full parse of 20 000 parts; at 100 000 parts the two are ~70x
   apart and the same assertion means something.
+- **Every built fixture writes a header on one line, and a fold between fields is not a fold
+  inside one.** The builders never fold, so nothing folded reached the parser for three
+  releases (F18). When a folded fixture was finally written, its folds fell between the fields
+  of `Received`, and "`received[]` does not change" went into a draft of the release notes on
+  its strength — while a fold inside the timestamp did change it. Fold where the value is,
+  not only where it is convenient.
 
 **Every fuzzer finding becomes a permanent test** with the offending bytes saved as a fixture
 `[D18]` — never a seed number in a log.
@@ -186,15 +210,22 @@ contract — the version tag is.
 
 **What the version number says.** A patch fixes a defect and leaves the contract as it was
 (0.1.1). A minor release changes behaviour a consumer can see within `/v1` — which inputs raise
-a flag, say — without extending a closed set (0.2.0); calling that a patch would misdescribe it.
-Extending a closed set is `/v2`. `1.0.0` is released when the consumer says so `[D16]`.
+a flag, what a folded header yields — without extending a closed set (0.2.0, 0.3.0); calling
+that a patch would misdescribe it. Extending a closed set is `/v2`. `1.0.0` is released when
+the consumer says so `[D16]`.
 
 **Every release, in this order:** the notes list what changes in behaviour, measured by running
 the same inputs on the previous version and on this one rather than derived from the diff; the
-tag goes out only after CI is green on the commit it points at; the digest is read from two
-places that must agree — the release workflow's push and a pull of the tag — and recorded in the
-README and `CHANGELOG.md`; and the published image is run against the previous one on an input
-from each line of the notes, the previous version being the control.
+tag goes out only after CI is green on the commit it points at; the release workflow runs the
+pins on the image it built and pushes nothing if they fail; the digest is read from two places
+that must agree — the release workflow's push and a pull of the tag — and recorded in the README
+and `CHANGELOG.md`; and the published image is run against the previous one on an input from
+each line of the notes, the previous version being the control.
+
+**An "unchanged" line in the notes is a negative result**, and needs what every negative result
+needs: an input on which the change would show if it were there. "`received[]` does not
+change" was measured on a hop folded between its fields, where nothing could change, and a
+reviewer found the timestamp moving before the tag did.
 
 The release notes are the annotated tag message, mirrored in `CHANGELOG.md` with the digest once
 it is published. **A tag is never pushed again, not even to fix its message:** that runs the
@@ -212,7 +243,15 @@ The full record is `docs/SPEC.md` §22. The ones most likely to be "improved" by
   ~10× per part and would blow the dissection budget on a large message (F3).
 - **`COMPAT32_TEXT`**, not stock `compat32`, is the policy every parser uses. The stock one
   hands a header value with an 8-bit byte out as an `email.header.Header`, not a string, and
-  "simplifying" the subclass away brings back a 500 on one byte in any header (F17).
+  "simplifying" the subclass away brings back a 500 on one byte in any header (F17). The same
+  fetch is where a value is unfolded (F18): one place, through which the headers of a message,
+  of a part and of a nested message all pass. Moving the unfolding "closer to where it is
+  needed" — into `header_map`, say — quietly leaves parts and nested messages folded again.
+- **[D24]** `headers{}` is the parsed view of a header — unfolded, decoded, a structured header
+  as the parser renders it — and the `headers` artifact is the record of how it was written.
+  "Restoring the value as written" in `headers{}` looks like fidelity and is a regression; the
+  record is already served, byte for byte. Which headers are structured is the interpreter's
+  map, pinned by `tests/pins.py` on the image's Python.
 - **[D12]** the `eml` artifact carries original bytes; never reassemble a message to produce it
   or its hashes (F1).
 - **[D13]** part and nesting limits are established before the tree is built; a limit checked
