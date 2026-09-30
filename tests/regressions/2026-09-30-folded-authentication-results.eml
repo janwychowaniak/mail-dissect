@@ -1,0 +1,17 @@
+Authentication-Results: mx.example.org;
+	spf=pass (sender IP is 192.0.2.10) smtp.mailfrom=example.net;
+	dkim=fail (signature did not verify) header.d=example.net;
+	dmarc=pass action=none header.from=example.net
+Received-SPF: Pass (mx.example.org: domain of example.net designates
+ 192.0.2.10 as permitted sender) receiver=mx.example.org;
+ client-ip=192.0.2.10; helo=mx.example.net;
+List-Unsubscribe: <https://lists.example.net/unsub?id=1>,
+ <mailto:unsub@lists.example.net>
+From: Alice <alice@example.net>
+To: recipient@example.org
+Subject: auth results
+Date: Tue, 30 Sep 2026 10:00:00 +0200
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+hello

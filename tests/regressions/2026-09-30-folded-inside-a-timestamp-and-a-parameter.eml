@@ -1,0 +1,15 @@
+Received: from mx.example.net (mx.example.net [192.0.2.10]) by mail.example.org
+	with ESMTPS id abc123; Wed, 30 Sep 2026 10:00:00 +0200
+	(CEST)
+Received: from origin.example.net by mx.example.net with ESMTP id def456; Wed, 30 Sep 2026
+ 09:59:58 +0200
+Authentication-Results: mx.example.org; dkim=fail reason="bad
+ signature" header.d=example.net
+From: Alice <alice@example.net>
+To: recipient@example.org
+Subject: folded inside a timestamp and a parameter
+Date: Wed, 30 Sep 2026 10:00:00 +0200
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+hello

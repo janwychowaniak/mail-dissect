@@ -1,0 +1,9 @@
+From: Alice <alice@example.net>
+Subject: =?utf-8?B?WmFrb8WEY3pvbmUgc3ByYXdkemFuaWUgc2xvd2E=?=
+ =?utf-8?B?IGRydWdhIHBvbG93YQ==?=
+To: recipient@example.org
+Date: Tue, 30 Sep 2026 10:00:00 +0200
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+hello

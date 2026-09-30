@@ -1,6 +1,7 @@
 # Research notes — CPython `email`, the dependencies, the tools
 
-F1–F10 were probed **2026-09-17** and F17 **2026-09-23**, on **CPython 3.13.12** with
+F1–F10 were probed **2026-09-17**, F17 **2026-09-23** and F18 **2026-09-30**, on
+**CPython 3.13.12** with
 [`probes/email_stdlib.py`](probes/email_stdlib.py), which needs nothing but the standard
 library; F11–F12 on **2026-09-23** with [`probes/dependencies.py`](probes/dependencies.py)
 against the versions in `uv.lock`. Each of them is printed by one function in its script; re-run
@@ -38,6 +39,11 @@ number, as F15 was.
 - Under `compat32` a header value holding an 8-bit byte is an `email.header.Header`, not a
   string, while F5 was measured under `policy.default`. Hence `COMPAT32_TEXT`, and the count of
   what the registry replaced silently behind `encoding_fallback`. (F17)
+- `compat32` hands a folded header value out with its line breaks in it, and the header
+  registry does not unfold: it raises on an address, keeps the break in an unstructured
+  value, and drops the parameters after it. `policy.default` unfolds first, and F7 was
+  measured on one-line values. Hence `[D24]`: every value is unfolded where it is fetched.
+  (F18)
 
 ---
 
@@ -436,3 +442,73 @@ and that is not an `httpx.HTTPError`, so it escaped the client's handling as a 5
 with a control character is sent and answered **400**, which the client reports as the tool
 being `down`. The control, `application/pdf`, reached the tool and was answered on its merits.
 
+## F18 — the header registry does not unfold, and `compat32` hands the fold over
+
+| Header as written (`⏎` is CRLF) | `compat32` holds | The registry, given that | The registry, unfolded first |
+| --- | --- | --- | --- |
+| `From: Alice Example⏎<TAB><alice@example.net>` | `'Alice Example\r\n\t<alice@example.net>'` | **`ValueError`**: address parts cannot contain CR or LF | `'Alice Example <alice@example.net>'` |
+| `Subject: =?utf-8?q?exam?=⏎ =?utf-8?q?ple?=` | `'=?utf-8?q?exam?=\r\n =?utf-8?q?ple?='` | `'exam\r\n ple'`, no defect | `'example'` |
+| `X-Note: first⏎ second` | `'first\r\n second'` | `'first\r\n second'`, no defect | `'first second'` |
+| `Content-Type: text/plain;⏎ charset=utf-8` | `'text/plain;\r\n charset=utf-8'` | `'text/plain;'`, two defects, the parameter gone | `'text/plain; charset="utf-8"'` |
+| `X-After-Colon:⏎ value` (the control) | `'value'` | `'value'` | `'value'` |
+
+The last column is also what `policy.default` returns for each of them. It gets there because
+unfolding is the policy's step, not the registry's: `EmailPolicy.header_fetch_parse` removes
+every line break (`\n|\r\n?`) before its header factory sees the value. `compat32` has no such
+step — it stores the value with the breaks in it and hands it out that way — and this service
+reads the tree under `compat32` `[D11]` and calls the registry itself (F7). So the step was
+nobody's. A value broken straight after its colon is the one fold `compat32` does remove, which
+is why the control comes through.
+
+F7 measured the registry on one-line values, and every fixture the tests build is one line to
+a header, so nothing folded had reached it. The measurement was true, and it was not about what
+`compat32` hands over — the mistake of F17 again, a measurement of the neighbour, made once in
+the probe and once in the fixtures.
+
+What that did in the service, measured on 0.2.0 with a folded message and its unfolded twin:
+
+| Folded | 0.2.0 returned | Its unfolded twin |
+| --- | --- | --- |
+| any address header | one entry of nulls in `addresses`, the raw value undecoded in `headers` | the addresses, decomposed |
+| two encoded-words either side of a fold | both decoded, `\r\n` and the white space left between them | joined, as RFC 2047 §6.2 says |
+| any other header | the value with `\r\n` in it | the value |
+| `Content-Type` | `text/plain;` in `headers`, the tree and the body read correctly | `text/plain; charset="…"` |
+| a name cut between two encoded-words | its second half as a candidate in `observables[]` | the name |
+| an address header with an encoded-word that does not decode | undecoded, no `encoding_fallback` | U+FFFD and the flag |
+| a part's `filename=`, `name=` or `Content-ID`, folded inside the value | the field with `\r\n` in it | the field |
+| `Received`, folded inside its timestamp | `received[].timestamp` with `\r\n` in it | the timestamp |
+| `Authentication-Results`, folded inside a quoted parameter | that entry of `auth[].params` with `\r\n` in it | the parameter |
+
+The last two rows are the only fields of `received[]` and `auth[]` that take more than one
+token. Every other field there is a single token, which white space ends, so a fold could only
+fall between fields, and those came out the same either way. This was first recorded as
+"`received[]` and `auth[]` came out the same", from a fixture folded between fields and nowhere
+else — a measurement of the neighbour, inside the note about one. The timestamp was pointed out
+in review, and the parameter turned up when the same question was then asked of `auth[]`.
+
+The MIME tree itself — which parts there are, their types, their charsets and their bodies —
+came out the same on every folded message measured: the standard library's own readers of
+`Content-Type` cope with a folded value.
+
+Hence the unfolding in `COMPAT32_TEXT.header_fetch_parse`: one place, through which every
+header of a message, of a part and of a nested message is fetched, removing the same
+characters `policy.default` removes.
+
+**Which headers are structured is the interpreter's map.** `headers{}` returns the registry's
+rendering of a structured header and the written value of any other `[D24]`, so the map is part
+of what a response depends on:
+
+| Registry class | Headers |
+| --- | --- |
+| `UniqueAddressHeader` | `from`, `to`, `cc`, `bcc`, `reply-to` — and `return-path`, by F6 |
+| `AddressHeader` | `resent-from`, `resent-to`, `resent-cc`, `resent-bcc` — and `resent-reply-to`, by F6 |
+| `UniqueSingleAddressHeader`, `SingleAddressHeader` | `sender`, `resent-sender` |
+| `UniqueDateHeader`, `DateHeader` | `date`, `orig-date`, `resent-date` |
+| `MessageIDHeader`, `ReferencesHeader` | `message-id`, `in-reply-to`, `references` |
+| `MIMEVersionHeader`, `ContentTypeHeader`, `ContentTransferEncodingHeader`, `ContentDispositionHeader` | `mime-version`, `content-type`, `content-transfer-encoding`, `content-disposition` |
+| `UniqueUnstructuredHeader`, and `UnstructuredHeader` for every other name | `subject`, and the rest |
+
+A Python release that maps a name differently changes what the service returns for that
+header without a line of this repository changing. `tests/pins.py` holds the map and the values
+of the saved folded messages, and CI runs it inside the built image, on the interpreter that is
+published, as well as in the suite.

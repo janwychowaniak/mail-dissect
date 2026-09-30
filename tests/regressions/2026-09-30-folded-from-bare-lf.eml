@@ -1,0 +1,9 @@
+From: Alice Example
+	<alice@example.net>
+To: recipient@example.org
+Subject: bare lf fold
+Date: Tue, 30 Sep 2026 10:00:00 +0200
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+hello

@@ -1,0 +1,11 @@
+Received: from mx.example.net (mx.example.net [192.0.2.10])
+	by mail.example.org with ESMTPS id abc123
+	for <recipient@example.org>; Tue, 30 Sep 2026 10:00:00 +0200
+From: Alice <alice@example.net>
+To: recipient@example.org
+Subject: folded received
+Date: Tue, 30 Sep 2026 10:00:00 +0200
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+hello

@@ -2,9 +2,9 @@
 
 Run:  python3.13 docs/research/probes/email_stdlib.py
 
-Findings F1 to F10 and F17 in ../NOTES.md are produced by one function each here. The probes are
-read-only, offline, and depend on nothing but the standard library, so anyone
-can re-run them against a newer interpreter and see whether a finding still
+Findings F1 to F10, F17 and F18 in ../NOTES.md are produced by one function each here.
+The probes are read-only, offline, and depend on nothing but the standard library, so
+anyone can re-run them against a newer interpreter and see whether a finding still
 holds. Print output is the evidence; keep it terse enough to paste.
 """
 
@@ -344,6 +344,46 @@ def f17_compat32_hands_out_a_header_object() -> None:
         print(f"codecs.lookup({name!r}) -> {result}")
 
 
+def f18_the_registry_does_not_unfold() -> None:
+    """What `compat32` stores for a folded header, and what the header registry makes of it."""
+    _banner("F18", "a folded header value under compat32, handed to the header registry")
+    raw = (
+        b"From: Alice Example\r\n\t<alice@example.net>\r\n"
+        b"Subject: =?utf-8?q?exam?=\r\n =?utf-8?q?ple?=\r\n"
+        b"X-Note: first\r\n second\r\n"
+        b"Content-Type: text/plain;\r\n charset=utf-8\r\n"
+        b"X-After-Colon:\r\n value\r\n"
+        b"\r\nbody\r\n"
+    )
+    stored = message_from_bytes(raw, policy=email.policy.compat32)
+    reference = message_from_bytes(raw, policy=email.policy.default)
+    registry = HeaderRegistry()
+    splitter = email.policy.linesep_splitter
+
+    def through_registry(name: str, value: str) -> str:
+        try:
+            header = registry(name, value)
+        except Exception as exc:
+            return f"{type(exc).__name__}: {exc}"
+        return f"{str(header)!r}  defects={len(header.defects)}"
+
+    for name in ("From", "Subject", "X-Note", "Content-Type", "X-After-Colon"):
+        value = stored[name]
+        unfolded = "".join(splitter.split(value))
+        print(f"{name}: compat32 holds {value!r}")
+        print(f"    registry, as held     -> {through_registry(name, value)}")
+        print(f"    registry, unfolded    -> {through_registry(name, unfolded)}")
+        print(f"    registry, and lstrip  -> {through_registry(name, unfolded.lstrip(' \t'))}")
+        print(f"    policy.default        -> {str(reference[name])!r}")
+    print(f"policy.default unfolds with {splitter.pattern!r} before its registry sees a value")
+    kinds: dict[str, list[str]] = {}
+    for name, cls in sorted(registry.registry.items()):
+        kinds.setdefault(cls.__name__, []).append(name)
+    for kind, names in sorted(kinds.items()):
+        print(f"registry map  {kind:30s} {', '.join(names)}")
+    print(f"registry map  default: {registry.default_class.__name__}")
+
+
 def main() -> int:
     print(f"python {sys.version}")
     f1_nested_reserialisation_is_not_byte_identical()
@@ -357,6 +397,7 @@ def main() -> int:
     f8_broken_encodings_do_not_raise()
     f10_html_parser_survives_hostile_input()
     f17_compat32_hands_out_a_header_object()
+    f18_the_registry_does_not_unfold()
     return 0
 
 

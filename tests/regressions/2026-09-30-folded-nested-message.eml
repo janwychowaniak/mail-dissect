@@ -1,0 +1,28 @@
+From: Outer Sender <outer@example.org>
+To: first@example.org
+Subject: outer
+Date: Tue, 30 Sep 2026 10:00:00 +0200
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="BOUND"
+
+--BOUND
+Content-Type: text/plain; charset=utf-8
+
+cover
+--BOUND
+Content-Type: message/rfc822
+Content-Disposition: attachment
+
+From: Inner Sender
+	<inner@example.net>
+To: second@example.org
+Subject: =?utf-8?B?Wm9iYWN6IGV4YW0=?=
+ =?utf-8?B?cGxlLmNvbSB0ZXJheg==?=
+Date: Tue, 30 Sep 2026 09:00:00 +0200
+MIME-Version: 1.0
+Content-Type: text/plain;
+ charset=utf-8
+
+inner hello
+
+--BOUND--

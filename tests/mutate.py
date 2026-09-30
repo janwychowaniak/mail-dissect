@@ -132,6 +132,32 @@ def non_ascii_header_bytes(raw: bytes, rng: random.Random) -> bytes:
     return b"\r\n".join(lines)
 
 
+def fold_header_lines(raw: bytes, rng: random.Random) -> bytes:
+    """Break header lines at their white space, with CRLF or a bare LF (F18).
+
+    Any header line, the message's or a part's. A folded header is ordinary mail, and every
+    fixture here is built one line to a header, so until this the fuzzer never sent a folded
+    one — while the header registry raises on an address with a line break in it.
+    """
+    lines = raw.split(b"\r\n")
+    headers = [index for index, line in enumerate(lines) if _HEADER_LINE.match(line)]
+    if not headers:
+        return raw
+    for _ in range(rng.randrange(1, 6)):
+        index = rng.choice(headers)
+        line = lines[index]
+        # Not where this mutator has already folded: a second break before the same white
+        # space is an empty line, which ends the header block instead of folding it.
+        spaces = [
+            at for at, byte in enumerate(line) if byte in b" \t" and line[at - 1 : at] != b"\n"
+        ]
+        if not spaces:
+            continue
+        position = rng.choice(spaces)
+        lines[index] = line[:position] + rng.choice([b"\r\n", b"\n"]) + line[position:]
+    return b"\r\n".join(lines)
+
+
 def mixed_line_endings(raw: bytes, rng: random.Random) -> bytes:
     parts = raw.split(b"\r\n")
     return (
@@ -154,6 +180,7 @@ MUTATORS: tuple[Mutator, ...] = (
     very_long_line,
     control_bytes,
     non_ascii_header_bytes,
+    fold_header_lines,
     mixed_line_endings,
 )
 

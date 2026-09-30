@@ -230,7 +230,10 @@ The split follows from a single walk, with no `Content-Disposition` criterion:
 ## 7. Headers
 
 - `headers` carries **every** header, names lowercased, values as a list in order of
-  appearance, in the form they were written (after RFC 2047 decoding).
+  appearance. Each value is the **parsed view** of the header `[D24]` — unfolded, RFC 2047
+  decoded, and for a structured header rendered by the parser that read it — and not the
+  record of how it was written. The record is the `headers` artifact (§13.1), which carries
+  the original bytes.
 - `addresses` decomposes **every address header present** — `from`, `to`, `cc`, `bcc`,
   `reply-to`, `sender`, `return-path`, `resent-*` — into `display_name`, `address`,
   `local_part` and `domain`. Decomposing an address costs the same for three headers as for
@@ -246,6 +249,32 @@ The split follows from a single walk, with no `Content-Disposition` criterion:
   `softfail`, `permerror`, `none`, …) and its accompanying parameters.
 
 Decomposition never replaces the raw header: everything above also remains in `headers`.
+
+**A value is read after unfolding** `[D24]`. A header may be written across several lines, and
+where its writer broke it is not part of its value (RFC 5322 §2.2.3): the line break — `CRLF`
+or a bare `LF` — is removed, and the white space that followed it is kept. RFC 2047 decoding
+works on the unfolded value, so the white space between two adjacent encoded-words is dropped
+(§6.2 of that RFC) whether or not a line break stood in it.
+
+**Folding never changes a result.** A message, and the same message with its headers written
+on one line each, yield the same response at every level — the top-level message, its parts,
+every nested message — except for what describes the bytes themselves: sizes, hashes, and the
+`eml` and `headers` artifacts, which carry the folds as they were written.
+
+**The structured headers are** the ones whose grammar the parser knows: the address headers
+`from`, `to`, `cc`, `bcc`, `reply-to`, `sender`, `return-path`, `resent-from`, `resent-to`,
+`resent-cc`, `resent-bcc`, `resent-sender` and `resent-reply-to`; the dates `date`,
+`orig-date` and `resent-date`; the identifiers `message-id`, `in-reply-to` and `references`;
+and `mime-version`, `content-type`, `content-transfer-encoding` and `content-disposition`.
+
+A structured value comes back as the parser renders what it parsed, not as it was typed:
+`"Alice  Example"   <alice@example.net>` is returned as `Alice  Example <alice@example.net>`,
+a `Return-Path` of `<bounce@example.net>` as `bounce@example.net`, and
+`text/plain; charset=utf-8` as `text/plain; charset="utf-8"`. Every other header is
+unstructured, and its value is what was written, unfolded and decoded, with nothing else
+touched. The list is given by name because the rendering is the standard library's, and which
+headers it applies to is a property of the interpreter: it is pinned by a test that runs on the
+interpreter the image ships (F18).
 
 RFC 2047 decoding goes through the standard library's `HeaderRegistry`, never through
 `make_header(decode_header(...))`, which raises on input a hostile sender fully controls (F7).
@@ -602,6 +631,10 @@ body, including nested ones** `[D3]`, each a separate artifact with its own `mes
 Rendering only the top-level message would be a choice made for the consumer, and a nested
 message is often the one that matters.
 
+The `headers` artifact is the header block as it was written: the bytes up to the first empty
+line, with the folds and the encoded-words untouched. That is what lets `headers{}` be a parsed
+view `[D24]` — nothing the view leaves out is lost.
+
 ### 13.2 `eml` carries original bytes
 
 The `eml` artifact — of the top-level message and of every nested one — carries bytes **taken
@@ -915,7 +948,7 @@ corpus hits that by accident, if at all. A synthetic message aims at a specific 
 is repeatable.
 
 The suite is **offline by default** — no network, no dependency reachable — and CI depends on
-that. Sixty-six numbered acceptance cases are listed in
+that. Sixty-nine numbered acceptance cases are listed in
 [`spec-coverage.md`](spec-coverage.md), each mapped to the section it exercises.
 
 **Resilience is a separate species of test:** a correct synthetic message is damaged
@@ -923,7 +956,8 @@ programmatically and the service is required not to fall over. Mutations cover a
 truncation at a random offset, removed and duplicated headers, a header with no colon and no
 value, broken `base64` and `quoted-printable`, a charset declaration disagreeing with content,
 missing and mismatched `boundary`, empty parts, nesting deeper than the limit, very long lines,
-control characters and a NUL byte, bytes above 0x7F in header values, mixed `CRLF` and `LF`.
+control characters and a NUL byte, bytes above 0x7F in header values, header lines folded at
+their white space, mixed `CRLF` and `LF`.
 
 The criterion is single and hard: **no mutation may raise an unhandled exception or exceed the
 time limit.** Acceptable outcomes are a correct response (however poor, with `malformed_mime`
@@ -984,6 +1018,16 @@ Approved by the maintainer, 2026-09-17.
   nothing is not reported at all. Amended for 0.2.0: until then every scrub was reported,
   including a lossless one, which made the flag fire on raw UTF-8 in an address but not on the
   same bytes in a subject.
+- **[D24] `headers{}` is the parsed view of a header, and the `headers` artifact is the record
+  of how it was written.** A value is unfolded before anything reads it — the line break goes,
+  the white space after it stays (RFC 5322 §2.2.3) — RFC 2047 decoding works on the unfolded
+  value, and a structured header, which §7 lists by name, comes back as the parser renders it.
+  So folding never changes a result, at any level of a message. Decided 2026-09-30, for 0.3.0:
+  until then the line break stayed in the value, so a folded address header was decomposed
+  into nulls, a word cut between two encoded-words came back as two, a folded `Content-Type`
+  lost its parameters, and the scan of `observables[]` took the second half of a cut name for a
+  candidate of its own (F18). §7 had said that values come "in the form they were written",
+  which was never true of a structured header, folded or not.
 
 **Implementation**
 

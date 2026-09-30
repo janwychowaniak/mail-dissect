@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import random
+import re
 import time
 from pathlib import Path
 
@@ -184,6 +185,21 @@ def test_a_non_ascii_byte_in_any_header_is_dissected(
     """
     body = dissect(client, _HEADER_PLACES[place].replace(b"{X}", byte))
     DissectResponse.model_validate(body)
+
+
+@pytest.mark.parametrize("seed", DEFAULT_SEEDS)
+def test_the_fold_mutator_folds(seed: int) -> None:
+    """F18: a mutator that stopped matching would be a no-op, and a green one.
+
+    Every message of the corpus comes back folded, and taking the folds out gives the original
+    back — so what the fuzzer sends is the same message written across more lines, which is
+    the shape no fixture had.
+    """
+    rng = random.Random(seed)
+    for original in _corpus():
+        folded = mutate.fold_header_lines(original, rng)
+        assert folded != original
+        assert re.sub(rb"\r?\n([ \t])", rb"\1", folded) == original
 
 
 def test_a_message_that_is_not_one_is_refused(client: TestClient) -> None:

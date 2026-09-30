@@ -1,8 +1,9 @@
-"""Header reading: every header, in order, decoded (SPEC §7).
+"""Header reading: every header, in order, unfolded and decoded (SPEC §7).
 
 RFC 2047 goes through `HeaderRegistry`, never `make_header(decode_header(...))`, which raises
 on input a hostile sender fully controls (F7). The registry is remapped first, because two of
-the address headers the contract names are not address types in the standard library (F6).
+the address headers the contract names are not address types in the standard library (F6),
+and it is given unfolded values, because unfolding is the policy's job and not its own (F18).
 """
 
 from __future__ import annotations
@@ -20,17 +21,29 @@ from .models import substituted
 
 
 class _Compat32Text(Compat32):
-    """`compat32` that hands every header value out as the string it was parsed into.
+    """`compat32` that hands every header value out as the unfolded string it holds.
 
     Stock `compat32` wraps a value holding 8-bit bytes in an `email.header.Header` (F17), and
     nothing here expects one: it reached `.strip()` and a regex, and one byte above 0x7F in any
     header of a message was a 500. As a string the bytes stay lone surrogates, which is the
-    shape `[D20]` scrubs at the response boundary and reports as `encoding_fallback`. Only
-    fetching changes; parsing is compat32's own, so `[D11]` holds.
+    shape `[D20]` scrubs at the response boundary and reports as `encoding_fallback`.
+
+    It also hands the value out exactly as it was stored, line breaks included, and nothing
+    here expects those either (F18): the header registry refuses an address with one in it,
+    keeps it inside an unstructured value, and drops the parameters that follow it. Where a
+    writer broke a line is not part of the value (RFC 5322 §2.2.3), so the break is removed
+    here, once, for everything that reads a header — the message's, a part's, a nested
+    message's `[D24]`. The white space after the break stays.
+
+    Only fetching changes; parsing is compat32's own, so `[D11]` holds.
     """
 
     def header_fetch_parse(self, name: str, value: str) -> str:
-        return value
+        # A CR or LF inside a stored value is a fold and nothing else: the header ended at the
+        # first line that did not start with white space. `policy.default` removes the same
+        # characters, as `\n|\r\n?`; two replacements cost a fetch next to nothing, which
+        # matters because the parser fetches several headers for every part (F3).
+        return value.replace("\r", "").replace("\n", "")
 
 
 COMPAT32_TEXT = _Compat32Text()

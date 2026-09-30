@@ -1,0 +1,9 @@
+From: =?iso-8859-2?Q?=A3=F3d=BC_Testowy?=
+	<sender@example.net>
+Subject: plain subject
+To: recipient@example.org
+Date: Tue, 30 Sep 2026 10:00:00 +0200
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+hello
