@@ -12,6 +12,7 @@ import codecs
 import ipaddress
 import re
 from dataclasses import dataclass
+from email.headerregistry import Address as StdlibAddress
 from email.headerregistry import AddressHeader, HeaderRegistry, UniqueAddressHeader
 from email.message import Message
 from email.parser import BytesHeaderParser
@@ -217,6 +218,8 @@ def addresses_of(raw: bytes) -> dict[str, list[Address]]:
         except Exception:
             entries = ()
         for entry in entries:
+            if not entry.domain and entry.username:
+                entry = _written_inside(lowered, entry.username) or entry
             spec = str(entry.addr_spec) if entry.addr_spec else None
             parsed.append(
                 Address(
@@ -232,6 +235,25 @@ def addresses_of(raw: bytes) -> dict[str, list[Address]]:
             parsed.append(Address(None, None, None, None))
         result.setdefault(lowered, []).extend(parsed)
     return result
+
+
+def _written_inside(name: str, local_part: str) -> StdlibAddress | None:
+    """The address a local part turns out to be, when it is exactly one `[D25]`.
+
+    `"Bob Example <bob@example.net>"` is, by the grammar, a quoted local part with no domain,
+    and the entry the parser returns for it is not an address anybody can use. The local part
+    is read once more, by the same parser, and taken only when that gives one mailbox with a
+    domain and no defect - the defect being what tells a clean reading from a mailbox found
+    in front of something the parser gave up on. Read once: the result is never read again.
+    """
+    try:
+        header = _registry(name, local_part)
+    except Exception:
+        return None
+    found: tuple[StdlibAddress, ...] = getattr(header, "addresses", ())
+    if len(found) != 1 or not found[0].domain or header.defects:
+        return None
+    return found[0]
 
 
 def parse_received(value: str) -> Hop:

@@ -250,6 +250,19 @@ The split follows from a single walk, with no `Content-Disposition` criterion:
 
 Decomposition never replaces the raw header: everything above also remains in `headers`.
 
+**An entry that is not an address is read once more** `[D25]`. A whole address written inside
+quotes — `From: "Bob Example <bob@example.net>"` — is, by the grammar, one quoted local part
+with no domain, and its entry would be an `address` holding the entire quoted string next to
+`domain: null`. When an entry has no domain, its local part is given to the same parser once,
+and the entry becomes what that yields **only if it is exactly one mailbox with a domain and
+the parser reports no defect**; `display_name`, `address`, `local_part` and `domain` are then
+that mailbox's. Anything less clean — text after the address, two addresses, no address —
+leaves the entry exactly as it was: the service does not cut an address out of a string. An
+entry that has a domain is never read again, whatever its display name looks like:
+`"first@example.org" <second@example.net>` has the display name `first@example.org` and the
+address `second@example.net`. `headers` does not move: it still shows the value with its
+quotes, which is how a consumer can tell that the address was written this way.
+
 **A value is read after unfolding** `[D24]`. A header may be written across several lines, and
 where its writer broke it is not part of its value (RFC 5322 §2.2.3): the line break — `CRLF`
 or a bare `LF` — is removed, and the white space that followed it is kept. RFC 2047 decoding
@@ -948,7 +961,7 @@ corpus hits that by accident, if at all. A synthetic message aims at a specific 
 is repeatable.
 
 The suite is **offline by default** — no network, no dependency reachable — and CI depends on
-that. Sixty-nine numbered acceptance cases are listed in
+that. Seventy numbered acceptance cases are listed in
 [`spec-coverage.md`](spec-coverage.md), each mapped to the section it exercises.
 
 **Resilience is a separate species of test:** a correct synthetic message is damaged
@@ -1028,6 +1041,16 @@ Approved by the maintainer, 2026-09-17.
   lost its parameters, and the scan of `observables[]` took the second half of a cut name for a
   candidate of its own (F18). §7 had said that values come "in the form they were written",
   which was never true of a structured header, folded or not.
+- **[D25] An address entry with no domain is read once more, and taken only as a clean
+  reading.** Its local part goes through the same parser, once; the entry becomes the result
+  only when that is exactly one mailbox with a domain and no defect, and is otherwise left as
+  it was. Decided 2026-09-30, for 0.4.0, after a report that a whole address written inside
+  quotes — `From: "Name <address>"` — came back as an `address` that is not one, with
+  `domain: null`: the reading the grammar asks for, and of no use to anyone who takes a sender
+  from `addresses`. It is a fact about the message and the same for every consumer (§2): the
+  rule holds no list and no guess, only the parser's own verdict, and "no defect" is what
+  keeps it from taking the first of two addresses or dropping the text after one (F19). The
+  value as written stays in `headers`.
 
 **Implementation**
 

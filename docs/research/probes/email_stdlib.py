@@ -2,7 +2,7 @@
 
 Run:  python3.13 docs/research/probes/email_stdlib.py
 
-Findings F1 to F10, F17 and F18 in ../NOTES.md are produced by one function each here.
+Findings F1 to F10 and F17 to F19 in ../NOTES.md are produced by one function each here.
 The probes are read-only, offline, and depend on nothing but the standard library, so
 anyone can re-run them against a newer interpreter and see whether a finding still
 holds. Print output is the evidence; keep it terse enough to paste.
@@ -384,6 +384,33 @@ def f18_the_registry_does_not_unfold() -> None:
     print(f"registry map  default: {registry.default_class.__name__}")
 
 
+def f19_an_address_written_inside_quotes() -> None:
+    """What the registry returns for a quoted string where an address goes, read once more."""
+    _banner("F19", "an address header holding a quoted string, and its local part read again")
+    registry = HeaderRegistry()
+    shapes = [
+        '"Bob Example <bob@example.net>"',
+        '"bob@example.net"',
+        '"Bob Example <bob@example.net> via list"',
+        '"Bob <bob@example.net> <eve@example.org>"',
+        '"bob@example.net, eve@example.org"',
+        '"Bob Example"',
+        '"bob@example.net".x',
+        '"first@example.org" <second@example.net>',
+    ]
+    for shape in shapes:
+        for entry in registry("from", shape).addresses:
+            first = f"{entry.addr_spec!r} domain={entry.domain!r}"
+            if entry.domain:
+                print(f"{shape}\n    parsed: {first}  (has a domain)")
+                continue
+            again = registry("from", entry.username)
+            boxes = [(a.display_name, a.addr_spec) for a in again.addresses]
+            defects = sorted({type(d).__name__ for d in again.defects})
+            print(f"{shape}\n    parsed: {first}")
+            print(f"    local part read again: {len(boxes)} mailbox(es) {boxes} defects={defects}")
+
+
 def main() -> int:
     print(f"python {sys.version}")
     f1_nested_reserialisation_is_not_byte_identical()
@@ -398,6 +425,7 @@ def main() -> int:
     f10_html_parser_survives_hostile_input()
     f17_compat32_hands_out_a_header_object()
     f18_the_registry_does_not_unfold()
+    f19_an_address_written_inside_quotes()
     return 0
 
 

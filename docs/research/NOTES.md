@@ -1,6 +1,6 @@
 # Research notes — CPython `email`, the dependencies, the tools
 
-F1–F10 were probed **2026-09-17**, F17 **2026-09-23** and F18 **2026-09-30**, on
+F1–F10 were probed **2026-09-17**, F17 **2026-09-23**, F18 and F19 **2026-09-30**, on
 **CPython 3.13.12** with
 [`probes/email_stdlib.py`](probes/email_stdlib.py), which needs nothing but the standard
 library; F11–F12 on **2026-09-23** with [`probes/dependencies.py`](probes/dependencies.py)
@@ -44,6 +44,10 @@ number, as F15 was.
   value, and drops the parameters after it. `policy.default` unfolds first, and F7 was
   measured on one-line values. Hence `[D24]`: every value is unfolded where it is fetched.
   (F18)
+- An address written inside quotes is, to the parser, a local part with no domain. Reading
+  that local part again gives the address — and for the shapes that are not one clean
+  address it gives a mailbox **and a defect**, with a mailbox count that differs between
+  3.13.12 and 3.13.15. Hence `[D25]` takes a reading only when there is no defect. (F19)
 
 ---
 
@@ -512,3 +516,40 @@ A Python release that maps a name differently changes what the service returns f
 header without a line of this repository changing. `tests/pins.py` holds the map and the values
 of the saved folded messages, and CI runs it inside the built image, on the interpreter that is
 published, as well as in the suite.
+
+## F19 — an address written inside quotes, and what reading its local part again gives
+
+`From: "Bob Example <bob@example.net>"` is one quoted string, and by the grammar a quoted
+string in that position is a local part. The registry returns one address for it with the whole
+string as its local part and no domain — `addr_spec` `'"Bob Example <bob@example.net>"'`,
+`domain` `''` — and records no defect on the header as a whole. Handing that local part to the
+same registry once more:
+
+| Written between the quotes | Mailboxes | Defects | One clean mailbox |
+| --- | --- | --- | --- |
+| `Bob Example <bob@example.net>` | 1: `bob@example.net`, name `Bob Example` | none | **yes** |
+| `bob@example.net` | 1: `bob@example.net` | none | **yes** |
+| `Bob Example <bob@example.net> via list` | 1 on 3.13.12, **2 on 3.13.15** (the second is `<>`) | `InvalidHeaderDefect` | no |
+| `Bob <bob@example.net> <eve@example.org>` | 1 on 3.13.12, **2 on 3.13.15** (the second is `<>`) | `InvalidHeaderDefect`, `ObsoleteHeaderDefect` | no |
+| `bob@example.net, eve@example.org` | 2 | none | no |
+| `Bob Example` | 1, with no domain | `InvalidHeaderDefect` | no |
+
+Two things follow. **The mailbox count alone is not a criterion**: on 3.13.12 the third and
+fourth rows hold exactly one mailbox with a domain, and taking it would drop the text after the
+address in one and the second address in the other, silently. The defect is what says the
+parser did not account for everything it was given — and it is there on both interpreters,
+while the count is not. **And the count moves within 3.13**: the same input is one mailbox on
+the interpreter the suite ran on and two on the one in the image built the same day. The
+verdict of `[D25]` is the same on both for every shape measured, because a second mailbox and
+a defect each rule the reading out on their own; `tests/pins.py` pins the verdicts and runs on
+both.
+
+A mailbox with no domain always came with a defect here, so "has a domain" never decided a case
+by itself. It stays in the rule as the thing being asked for, and is tested against a stand-in
+parser, since this one cannot be made to produce the case.
+
+One shape is not a quoted string and is read the same way: `"bob@example.net".x`, a quoted
+word and an atom joined by a dot, which the parser reports as the single local part
+`bob@example.net.x`. Read again, that is the address `bob@example.net.x`. And an entry that has
+a domain is not read again at all: `"first@example.org" <second@example.net>` is the address
+`second@example.net` with the display name `first@example.org`, as written.

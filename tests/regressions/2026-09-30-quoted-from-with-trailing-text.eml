@@ -1,0 +1,8 @@
+From: "Bob Example <bob@example.net> via list"
+Subject: quoted from with trailing text
+To: recipient@example.org
+Date: Tue, 30 Sep 2026 10:00:00 +0200
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+hello

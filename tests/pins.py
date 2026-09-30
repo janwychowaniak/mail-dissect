@@ -1,9 +1,10 @@
 """What the service reads out of a header, pinned to the interpreter that does the reading.
 
 `headers{}` and `addresses{}` are the standard library's header parser at work `[D24]`, and
-that parser moves between patch releases of Python. So these expectations have two homes: the
-suite runs them on the developer's interpreter, and CI runs this file inside the built image,
-on the interpreter that is actually published:
+that parser moves between patch releases of Python: what it makes of a malformed address was
+one mailbox on 3.13.12 and two on 3.13.15, with the same defect either way `[D25]`. So these
+expectations have two homes: the suite runs them on the developer's interpreter, and CI runs
+this file inside the built image, on the interpreter that is actually published:
 
     docker run --rm -v "$PWD/tests:/tests:ro" mail-dissect:ci python /tests/pins.py
 
@@ -204,6 +205,83 @@ FOLDED: tuple[Folded, ...] = (
     ),
 )
 
+
+def _not_an_address(local_part: str) -> dict[str, str | None]:
+    """How an entry with no domain is reported: the quoted string is all there is."""
+    return {
+        "display_name": None,
+        "address": f'"{local_part}"',
+        "local_part": local_part,
+        "domain": None,
+    }
+
+
+@dataclass(frozen=True)
+class Quoted:
+    """One saved message whose address header holds a quoted string where an address goes."""
+
+    file: str
+    header: str
+    written: str
+    addresses: list[dict[str, str | None]]
+
+    @property
+    def raw(self) -> bytes:
+        return (REGRESSIONS / self.file).read_bytes()
+
+
+# `[D25]`: an entry with no domain is read once more, and taken only when its local part is
+# exactly one mailbox with a domain and the parser has nothing to say against it.
+QUOTED: tuple[Quoted, ...] = (
+    Quoted(
+        "2026-09-30-quoted-from.eml",
+        "from",
+        '"Bob Example <bob@example.net>"',
+        [_address("Bob Example", "bob@example.net")],
+    ),
+    Quoted(
+        "2026-09-30-quoted-entry-in-a-list.eml",
+        "to",
+        'Good One <good@example.org>, "B Two <b@example.org>"',
+        [_address("Good One", "good@example.org"), _address("B Two", "b@example.org")],
+    ),
+    Quoted(
+        "2026-09-30-quoted-bare-address.eml",
+        "from",
+        '"bob@example.net"',
+        [_address(None, "bob@example.net")],
+    ),
+    # Left as they were: text after the address, two addresses, no address at all. The first
+    # two do hold a mailbox the parser can find, and a defect that says it is not the whole
+    # of what was written.
+    Quoted(
+        "2026-09-30-quoted-from-with-trailing-text.eml",
+        "from",
+        '"Bob Example <bob@example.net> via list"',
+        [_not_an_address("Bob Example <bob@example.net> via list")],
+    ),
+    Quoted(
+        "2026-09-30-quoted-two-addresses.eml",
+        "from",
+        '"Bob <bob@example.net> <eve@example.org>"',
+        [_not_an_address("Bob <bob@example.net> <eve@example.org>")],
+    ),
+    Quoted(
+        "2026-09-30-quoted-name-only.eml",
+        "from",
+        '"Bob Example"',
+        [_not_an_address("Bob Example")],
+    ),
+    # The control: a display name that is itself an address, in front of a real one. The
+    # entry has a domain, so the rule has no business with it.
+    Quoted(
+        "2026-09-30-quoted-display-name-is-an-address.eml",
+        "from",
+        '"first@example.org" <second@example.net>',
+        [_address("first@example.org", "second@example.net")],
+    ),
+)
+
 _FOLD = re.compile(rb"\r?\n([ \t])")
 _BYTE_FACTS = {"size", "md5", "sha1", "sha256"}
 
@@ -287,6 +365,14 @@ def check_twin(case: Folded, dissect: Dissect) -> None:
     assert comparable(dissect(case.raw)) == comparable(dissect(twin)), case.file
 
 
+def check_quoted(case: Quoted, dissect: Dissect) -> None:
+    """The entry is the address written inside the quotes, or it is left exactly as it was."""
+    message = dissect(case.raw)["messages"][0]
+    assert message["addresses"][case.header] == case.addresses, case.file
+    # The view of the header itself does not move: it still shows what was written.
+    assert message["headers"][case.header] == [case.written], case.file
+
+
 def main() -> int:
     from fastapi.testclient import TestClient
 
@@ -311,6 +397,8 @@ def main() -> int:
             for case in FOLDED:
                 checks.append((f"values {case.file}", lambda c=case: check_values(c, dissect)))
                 checks.append((f"twin   {case.file}", lambda c=case: check_twin(c, dissect)))
+            for quoted in QUOTED:
+                checks.append((f"quoted {quoted.file}", lambda q=quoted: check_quoted(q, dissect)))
             for label, check in checks:
                 ran += 1
                 try:

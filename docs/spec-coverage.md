@@ -14,8 +14,9 @@ disagree, the specification is right and this file is stale.
 recorded as F13 showed that the extension registry knows none of the script formats; it
 covers the supplement introduced by `[D22]`. **Cases 67–69 were added for `[D24]`**, after a
 report against 0.2.0 showed that a folded header was read with its line break in it (F18);
-until then no case, and no fixture, had a header written across two lines. Any further case
-gets the next free number and a line saying where it came from.
+until then no case, and no fixture, had a header written across two lines. **Case 70 was added
+for `[D25]`**, from the same report: an address written inside quotes. Any further case gets
+the next free number and a line saying where it came from.
 
 ## Functional requirements
 
@@ -111,6 +112,7 @@ gets the next free number and a line saying where it came from.
 | 67 | a folded header gives the same result as its unfolded twin — every header, the message's, a part's and a nested message's, `CRLF` and bare `LF` | §7 | `test_folding::test_folding_does_not_change_the_result`, `…_a_saved_folded_message_equals_its_unfolded_twin`, `…_a_fold_inside_a_part_header_is_not_in_the_field`, `…_a_fold_inside_a_decomposed_value_is_not_in_the_field` |
 | 68 | a folded address header is decomposed, and encoded-words either side of a fold are joined | §7 | `test_folding::test_a_folded_header_yields_its_value` (+ `…_a_word_cut_by_a_fold_is_one_candidate`, `…_a_folded_content_type_keeps_its_parameters`) |
 | 69 | `headers{}` is the parsed view and the `headers` artifact the record; the structured headers are the ones §7 names | §7, §13.1 | `test_folding::test_headers_are_the_parsed_view_and_the_artifact_is_the_record`, `…_the_specification_names_the_structured_headers` |
+| 70 | an address entry with no domain is read once more: `"Name <address>"` and `"address"` are decomposed, in every address header; text after the address, two addresses or no address leave the entry as it was; an entry with a domain is never touched | §7 | `test_quoted_address::test_a_saved_quoted_address`, `…_every_address_header_is_read_the_same_way`, `…_anything_less_than_one_clean_mailbox_is_left_alone`, `…_the_display_name_is_never_where_an_address_comes_from` |
 
 ## Resilience
 
@@ -121,7 +123,7 @@ gets the next free number and a line saying where it came from.
 | Every finding becomes a permanent test | §18 | `test_fuzz::test_saved_findings_stay_fixed` over `tests/regressions/` |
 | A byte above 0x7F in any header, the message's or a part's, is dissected, never a 500 | §18 | `test_fuzz::test_a_non_ascii_byte_in_any_header_is_dissected`, mutator `non_ascii_header_bytes` |
 | A folded header line, the message's or a part's, is part of what the fuzzer sends | §18 | mutator `fold_header_lines` |
-| What is read out of a header holds on the interpreter the image ships: the registry's map, and the values of the saved folded messages | §7, `[D24]` | `tests/pins.py`, run by `test_folding` and inside the image by the CI `container` job |
+| What is read out of a header holds on the interpreter the image ships: the registry's map, the values of the saved folded messages, and the verdicts on the saved quoted addresses | §7, `[D24]`, `[D25]` | `tests/pins.py`, run by `test_folding` and inside the image by the CI `container` job |
 | `received[]`, `auth[]` and `encoding_fallback` do not depend on where a header was folded | §7, §5.1 | `test_folding::test_received_is_decomposed_the_same_folded_or_not`, `…_authentication_results_are_decomposed_the_same_folded_or_not`, `…_a_folded_address_header_reports_what_its_unfolded_twin_reports` |
 | The extractor gets the declared type only when a request header can carry it | §14.1 | `test_tools::test_the_extractor_gets_a_type_a_header_can_carry` |
 | `encoding_fallback` fires when a declaration is not taken or something is substituted, and only then | §5.1, §7.2, `[D20]` | `test_intake::test_an_eight_bit_header_byte_is_replaced_and_reported`, `…_flagged_only_when_reading_it_fell_back`, `…_raw_utf8_in_an_address_is_read_without_loss`, `…_non_ascii_byte_in_a_part_header_is_read_and_served`, `…_filename_is_flagged_only_when_its_declaration_fails` |
