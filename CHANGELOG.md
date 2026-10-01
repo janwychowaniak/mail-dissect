@@ -24,6 +24,65 @@ its defect.
   `defanged: true`. In every release since 0.1.0, measured on the published images.
   Saved as `2026-10-01-defanged-after-a-hyphen-or-a-period.eml`.
 
+## 0.5.0 — 2026-10-01
+
+`ghcr.io/janwychowaniak/mail-dissect@sha256:1b80fe5c240117ea0ac2ded52f7ff43b734bd1f42a39ccb05b0ee0953b49736e`
+
+A period or a hyphen that touches an IPv4 address is now taken for punctuation, unless a label
+character — a letter, a digit or an underscore, in any script — continues on its far side
+(SPEC §11.2, `[D26]`). Until now either mark, on either side, ruled the address out whatever
+stood beyond it, so an address that ended a sentence was not returned. A label character next to
+the address still rules it out, and so does one beyond the mark: a host name that begins with
+four numbers is still that host name.
+
+The `/v1` paths, fields and value sets are unchanged. What moves is `observables[]` for a
+message with an IPv4 address next to a period or a hyphen — in a header, a text body, an HTML
+body and the text extracted from a document alike. Measured on the same inputs against 0.4.0:
+
+**Changes:**
+
+- an address before a period — where the period ends a sentence, a line or the text, or is
+  itself followed by a bracket, a comma or further periods: returned, without the period; it
+  was not
+- an address after a period or an ellipsis: returned; it was not
+- an address after a hyphen, as in a list, and before a hyphen that is followed by a space or a
+  line break: returned; it was not
+- a range: `a- b` and `a -b` return both ends, where they returned one; `a...b`, `a..b` and
+  `a--b` return both, where they returned none
+- an address ending in `.123` or `.210` next to one of these marks: an `ip` candidate; it was a
+  `filename` candidate, because those two numbers are file extensions in the registry
+- an address that was already returned from another place in the message: still one entry, with
+  a higher count; when the newly recognised occurrence comes first, the entry stands there,
+  takes its `value_raw` and `defanged`, and lists that place first in `sources` — the other
+  places stay listed
+- an address, a hyphen and a line break, or an address and two hyphens, and then the rest of a
+  host name: the address and the rest of the name; it was the rest alone after the line break,
+  and the whole name with the two hyphens
+
+**Unchanged:**
+
+- an address next to a space, a comma, a semicolon, a colon, a bracket, a quote or a port
+- `192.0.2.1.example.net`, `192.0.2.1-static.example.net` and `192.0.2.1.Next`: the domain
+  candidate they were, and no address
+- five numbers, a version suffix, a word joined on by a hyphen or a period (`192.0.2.1.5`,
+  `192.0.2.1-rc1`, `word-192.0.2.1`, `end.192.0.2.1`), also after a non-ASCII letter or an
+  underscore: no address
+- a range with a bare hyphen, `a-b`: neither end
+- a range with ports, with prefix lengths, or after an IPv4-mapped IPv6 address: the left end
+  only
+- an IPv6 address: a period before it rules it out, a period or a hyphen after it does not
+- four numbers a parser refuses (`999.1.1.1`), before a period or not
+- a defanged address before a period: returned, as it was; a defanged form directly after a
+  hyphen or a period: not returned, in any grammar — a known defect, listed above
+- domains, URLs, email addresses and hashes next to a period or a hyphen
+- every message with no IPv4 address next to a period or a hyphen: identical responses; and in
+  every message, everything outside `observables[]`
+
+Also in this release: this file lists the defects that are known and not fixed, each with a
+saved message and a test that fails once it is.
+
+Verified against `apache/tika:3.2.3.0` and `gotenberg/gotenberg:8.37.0`.
+
 ## 0.4.0 — 2026-10-01
 
 `ghcr.io/janwychowaniak/mail-dissect@sha256:2405d4b2d6a350a07fdd375421711f73b513b6660dc7d68ae40f54fd6b3fb577`

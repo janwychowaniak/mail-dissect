@@ -286,7 +286,7 @@ The digests those tags resolved to, for anyone pulling from a registry:
 ```
 apache/tika@sha256:c0154cb95587cde64be74f35ada1a2bd7892219f3f0ac3c9dc6cab34046b3573
 gotenberg/gotenberg@sha256:f29984bd1e226bf1b93ba90af06000afa8b315853e99d27b9aaa41b93f15c769
-ghcr.io/janwychowaniak/mail-dissect@sha256:2405d4b2d6a350a07fdd375421711f73b513b6660dc7d68ae40f54fd6b3fb577
+ghcr.io/janwychowaniak/mail-dissect@sha256:1b80fe5c240117ea0ac2ded52f7ff43b734bd1f42a39ccb05b0ee0953b49736e
 ```
 
 **Moving the images to a host with no registry access.** A digest verifies a pull; on a host
