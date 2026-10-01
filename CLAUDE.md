@@ -26,9 +26,10 @@
 ## Source of truth
 
 `docs/SPEC.md` is the specification. Decisions are numbered `[D#]` there and cited from code
-comments and test docstrings. Measured behaviour — of the standard library, the dependencies
-and the tools — lives in `docs/research/NOTES.md` as `F#`, each saying how it was measured,
-most of them by a script in `docs/research/probes/`. Where the notes and the spec disagree, the
+comments and test docstrings. Measured behaviour — of the standard library, the dependencies,
+the tools and, where a decision rests on it, the service's own grammars (F20) — lives in
+`docs/research/NOTES.md` as `F#`, each saying how it was measured, most of them by a script in
+`docs/research/probes/`. Where the notes and the spec disagree, the
 spec wins — the notes record what the world does, the spec records what we decided.
 `docs/spec-coverage.md` maps every requirement and acceptance case to its section and its test;
 a row without a test is a promise nobody checks.
@@ -129,8 +130,8 @@ implementation is worse than no test, because it is counted as coverage.
 
 **One rule, because the forms keep changing.** Every failure of this discipline so far has
 been the same thing wearing a different coat: **the test was green for a reason that has
-nothing to do with the behaviour it describes.** Six forms have turned up so far, in tests and
-in measurements alike, and the seventh will not look like any of them — which is why the rule is
+nothing to do with the behaviour it describes.** Seven forms have turned up so far, in tests and
+in measurements alike, and the eighth will not look like any of them — which is why the rule is
 worth more than the list:
 
 - **An assertion that cannot fail.** `assert uptime_seconds >= 0` passed for months of
@@ -159,6 +160,15 @@ worth more than the list:
   on the one next to it. It happened again with F18: F7 measured the header registry on values
   written on one line, and `compat32` hands it folded ones, so every folded address header was
   decomposed into nulls for three releases.
+- **A behaviour that holds because a neighbour happens to cover it.** A draft of `[D26]` let
+  any hyphen stand before an IPv4 address, and a range written `a-b` still returned neither
+  end — not because the rule refused the right end, but because the alternative for a domain
+  or a file name had swallowed both. Where that alternative does not reach — after a non-ASCII
+  letter, an underscore, a hash — the address after the hyphen came back (F20). The same
+  showed under mutation: with the lookbehind for a label character taken out, `v192.0.2.1` was
+  still refused, by the neighbour, and only `_192.0.2.1` and `é192.0.2.1` went red. A case that
+  stays green with its rule removed describes the neighbour. Put the property in the rule
+  itself, and keep a case that nothing else covers.
 
 **Mutation is a ritual of every stage, not a gesture.** Before a stage is pushed, pick its
 load-bearing behaviours, break each one in the source on purpose, and check that the tests
@@ -189,6 +199,10 @@ zero that read as a result during this project:
   argument with newlines in it, exited with 2, and a scan for leaked wording read no file at
   all. Feed file lists through `xargs`, and keep a positive control in the scan — a token that
   is certainly there — so an empty result can be told from a scan that never ran.
+- **An unquoted glob in zsh aborts the command it is an argument of.** `grep -rn … tests
+  --include=*.py` answered `no matches found: --include=*.py` and never ran, so its part of the
+  output was empty — and an empty part reads as "nothing mentions it". Quote the pattern
+  (`--include='*.py'`), and print the command's own exit status next to what it found.
 
 **Three fixture traps that will come back:**
 
@@ -217,17 +231,22 @@ contract — the version tag is.
 
 **What the version number says.** A patch fixes a defect and leaves the contract as it was
 (0.1.1). A minor release changes behaviour a consumer can see within `/v1` — which inputs raise
-a flag, what a folded header yields — without extending a closed set (0.2.0, 0.3.0); calling
-that a patch would misdescribe it. Extending a closed set is `/v2`. `1.0.0` is released when
-the consumer says so `[D16]`.
+a flag, what a folded header yields, which addresses are candidates — without extending a closed
+set (every release from 0.2.0 to 0.5.0); calling that a patch would misdescribe it. Extending a
+closed set is `/v2`. `1.0.0` is released when the consumer says so `[D16]`.
 
 **Every release, in this order:** the notes list what changes in behaviour, measured by running
-the same inputs on the previous version and on this one rather than derived from the diff; the
-tag goes out only after CI is green on the commit it points at; the release workflow runs the
-pins on the image it built and pushes nothing if they fail; the digest is read from two places
-that must agree — the release workflow's push and a pull of the tag — and recorded in the README
-and `CHANGELOG.md`; and the published image is run against the previous one on an input from
-each line of the notes, the previous version being the control.
+the same inputs on the previous version and on this one rather than derived from the diff — the
+inputs chosen for the notes, and a generated corpus with every difference classified, because
+chosen inputs only show what was expected (three effects of 0.5.0 that nobody had listed came
+out of four thousand generated messages); the tag message is read line by line against those
+measurements by someone other than its author before the tag exists, because it cannot be
+corrected afterwards (two lines of 0.5.0's were); the tag goes out only after CI is green on the
+commit it points at; the release workflow runs the pins on the image it built and pushes nothing
+if they fail; the digest is read from two places that must agree — the release workflow's push
+and a pull of the tag — and recorded in the README and `CHANGELOG.md`; and the published image
+is run against the previous one on an input from each line of the notes, the previous version
+being the control.
 
 **An "unchanged" line in the notes is a negative result**, and needs what every negative result
 needs: an input on which the change would show if it were there. "`received[]` does not
