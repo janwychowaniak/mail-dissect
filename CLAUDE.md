@@ -272,6 +272,17 @@ The full record is `docs/SPEC.md` §22. The ones most likely to be "improved" by
   afterwards protects against the result, not against the work.
 - **[D9]** the observables collector is append-only and scans headers → text → HTML → document
   texts, so the deterministic core of the list does not move when a tool is absent.
+- **[D26]** a period or a hyphen that touches an IPv4 address is punctuation unless a label
+  character continues on its far side: one character, `\w` in any script, the same rule before
+  the address and after it. Every part of that is load-bearing and every part looks like
+  something to tidy (F20). The old `[\w.-]` class on both sides lost each address that ended a
+  sentence. Letting a period through after the address while refusing it before returns the
+  left end of `a...b` alone, and half a range reads as a single address. Looking past a run of
+  marks instead of at one character keeps `192.0.2.1--static.example.net` whole and returns the
+  right end of `a...b` alone. An ASCII-only label character lets `é-192.0.2.1` through, because
+  no other alternative swallows that token. And letting a hyphen through whatever follows it
+  looks like completeness for `a-b` and cuts `192.0.2.1-static.example.net` into an address and
+  the tail of a host name.
 - **[D15]** HTML is parsed with the standard library; do not reach for `lxml` for "robustness".
 - **[D20]**, SPEC §5.1: `encoding_fallback` fires when, and only when, a declared charset was
   not taken or something was substituted. A scrub that loses nothing — raw UTF-8 in an address
