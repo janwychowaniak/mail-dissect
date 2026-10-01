@@ -9,6 +9,46 @@ and can publish the same version under a different digest, which breaks the one 
 pinned deployment stands on. A wrong line in a tag message is corrected here instead, as an
 erratum that says what the tag claims and what is true.
 
+## 0.4.0 — 2026-10-01
+
+`ghcr.io/janwychowaniak/mail-dissect@sha256:2405d4b2d6a350a07fdd375421711f73b513b6660dc7d68ae40f54fd6b3fb577`
+
+An address entry with no domain is now read once more (SPEC §7, `[D25]`). A whole address
+written inside quotes — `From: "Name <address>"` — is, by the grammar, one quoted local part with
+no domain, and until now its entry was an `address` holding the entire quoted string, next to
+`domain: null`. The local part is now given to the same parser once, and the entry becomes what
+that yields only when it is exactly one mailbox with a domain and the parser reports no defect.
+Anything less clean leaves the entry exactly as it was, and an entry that has a domain is never
+read again.
+
+The `/v1` paths, fields and value sets are unchanged. What moves is `addresses{}` for an entry
+that had no domain, in every address header and at every message level. Measured on the same
+inputs against 0.3.0:
+
+**Changes:**
+
+- `"Name <address>"`: `display_name`, `address`, `local_part` and `domain` are the mailbox written
+  inside the quotes; they were null, the quoted string, its content and null
+- `"address"`: the address, with no display name
+- a quoted entry inside a list: that entry alone changes
+- a quoted word joined to an atom by a dot (`"a@b".c`): the one local part the parser makes of
+  it, read as an address
+
+**Unchanged:**
+
+- `headers{}`: the value with its quotes, as written
+- text after the address inside the quotes, two addresses inside the quotes, a name alone: the
+  entry as it was, with `domain: null` — the service does not cut an address out of a string
+- `"address" <other address>`: the display name stays what it is and the address is the other one
+- every entry that has a domain, and every message with no such entry: identical responses
+- `observables` and `flags`
+
+The seven shapes are pinned on the interpreter the image ships, where the parser returns one
+mailbox on 3.13.12 and two on 3.13.15 for the shapes that are left alone; the verdict is the
+same on both.
+
+Verified against `apache/tika:3.2.3.0` and `gotenberg/gotenberg:8.37.0`.
+
 ## 0.3.0 — 2026-09-30
 
 `ghcr.io/janwychowaniak/mail-dissect@sha256:164d4efc570ee1a5b0103d0e806ac9e0af476793aada0406e4ea3c685181b2c5`
