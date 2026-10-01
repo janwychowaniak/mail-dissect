@@ -130,3 +130,4 @@ the next free number and a line saying where it came from.
 | Determinism, including array order | §17 | `test_determinism::test_the_same_message_twice`, `…both_channels_agree` |
 | A stable reordering is still caught | §17 | `test_determinism::test_golden_observables` |
 | The tool contracts hold against the real images | §14 | `test_live_tools` (marker `live`, by hand) |
+| A defect that is known and not fixed yet is stated as the contract states it, and the statement cannot outlive the defect | §18, `CHANGELOG.md` | `test_known_defects` — each entry a saved message, a control that passes, and an expected failure in strict mode |

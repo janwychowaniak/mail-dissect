@@ -67,6 +67,13 @@ They arrive as **two separate lists**, because they ask two different questions:
 Keeping them apart is the point: merged into one list, the second question disappears, and it
 is usually the more valuable one.
 
+**A defect that is acknowledged and queued goes on the list**: `Known defects` in
+`CHANGELOG.md`, its saved message in `tests/regressions/`, and in `tests/test_known_defects.py`
+the contract's expectation marked as an expected failure — strict, and limited to
+`AssertionError` — next to a control that passes. An expected failure is satisfied by any
+failure, so without the control it is one more assertion that cannot fail. The fix removes the
+mark and the entry in the same commit; the strict mark is what makes forgetting that impossible.
+
 ## Language
 
 All repository content is **English**: code, comments, docstrings, documentation, commit

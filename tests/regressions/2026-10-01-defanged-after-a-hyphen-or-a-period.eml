@@ -1,0 +1,12 @@
+From: Alice <alice@example.net>
+To: recipient@example.net
+Subject: a defanged form after a hyphen or a period
+Date: Thu, 01 Oct 2026 10:00:00 +0200
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+-one[.]example[.]net
+-hxxp://two[.]example[.]net/path
+-user[at]three[.]example[.]net
+-192[.]0[.]2[.]201
+.four[.]example[.]net

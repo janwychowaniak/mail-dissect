@@ -9,6 +9,21 @@ and can publish the same version under a different digest, which breaks the one 
 pinned deployment stands on. A wrong line in a tag message is corrected here instead, as an
 erratum that says what the tag claims and what is true.
 
+## Known defects
+
+Defects that are known and not fixed yet, in the release this file was shipped with. Each has a
+saved message in `tests/regressions/` and a test in `tests/test_known_defects.py` that states
+what the contract asks for and is marked as an expected failure, strictly: once the defect is
+fixed the suite fails until the mark and the entry here are removed, so an entry cannot outlive
+its defect.
+
+- **A defanged form directly after a hyphen or a period is not returned** (SPEC §11.3).
+  `-host[.]example[.]net`, `-hxxp://example[.]net/x`, `-user[at]example[.]net` and
+  `-192[.]0[.]2[.]1` yield no candidate, and neither does `.host[.]example[.]net`. The same
+  forms after a space — `- host[.]example[.]net` — are re-armed and returned with
+  `defanged: true`. In every release since 0.1.0, measured on the published images.
+  Saved as `2026-10-01-defanged-after-a-hyphen-or-a-period.eml`.
+
 ## 0.4.0 — 2026-10-01
 
 `ghcr.io/janwychowaniak/mail-dissect@sha256:2405d4b2d6a350a07fdd375421711f73b513b6660dc7d68ae40f54fd6b3fb577`

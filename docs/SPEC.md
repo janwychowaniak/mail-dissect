@@ -982,6 +982,11 @@ dissection or exceeded the time limit **stays in the suite as a permanent test w
 material saved** `[D18]`. Externally reported defects enter the same way: a minimal repro
 becomes another test, not an entry in an issue history.
 
+**A defect that is known and not fixed yet is on a list**, `Known defects` in `CHANGELOG.md`,
+with its saved message and a test that states what this contract asks for, marked as an
+expected failure in strict mode. The fix turns that test red until the mark and the entry are
+removed, so the list cannot fall behind the code in either direction.
+
 ## 19. Configuration
 
 Configuration is **environment variables only** (§15): the addresses of the optional
