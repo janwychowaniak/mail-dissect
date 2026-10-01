@@ -4,9 +4,12 @@ F1–F10 were probed **2026-09-17**, F17 **2026-09-23**, F18 and F19 **2026-09-3
 **CPython 3.13.12** with
 [`probes/email_stdlib.py`](probes/email_stdlib.py), which needs nothing but the standard
 library; F11–F12 on **2026-09-23** with [`probes/dependencies.py`](probes/dependencies.py)
-against the versions in `uv.lock`. Each of them is printed by one function in its script; re-run
-the script against a newer interpreter or dependency to see whether a finding still holds. Both
-scripts are offline and read-only. F13 to F16 each say how they were measured.
+against the versions in `uv.lock`; F20 on **2026-10-01** with
+[`probes/observables.py`](probes/observables.py), which measures the service's own grammars and
+was run inside the published 0.4.0 image and on the tree that became 0.5.0. Each of them is
+printed by one function in its script; re-run the script against a newer interpreter, dependency
+or release to see whether a finding still holds. The scripts are offline and read-only. F13 to
+F16 each say how they were measured.
 
 These notes feed [`../SPEC.md`](../SPEC.md). Where something is a **decision**, the spec
 wins; this file records only **what the standard library, the dependencies and the tools
@@ -48,6 +51,10 @@ number, as F15 was.
   that local part again gives the address — and for the shapes that are not one clean
   address it gives a mailbox **and a defect**, with a mailbox count that differs between
   3.13.12 and 3.13.15. Hence `[D25]` takes a reading only when there is no defect. (F19)
+- Every grammar but IPv4 took a period or a hyphen next to a candidate for punctuation; the
+  IPv4 one let either of them rule the address out, so an address that ended a sentence was
+  never a candidate. Hence `[D26]`: what decides is the character on the far side of the mark.
+  (F20)
 
 ---
 
@@ -553,3 +560,91 @@ word and an atom joined by a dot, which the parser reports as the single local p
 `bob@example.net.x`. Read again, that is the address `bob@example.net.x`. And an entry that has
 a domain is not read again at all: `"first@example.org" <second@example.net>` is the address
 `second@example.net` with the display name `first@example.org`, as written.
+
+## F20 — a period or a hyphen next to a candidate: every grammar took it for punctuation but IPv4
+
+Measured on the service itself, not on a dependency: the text goes to the collector, and the
+table is what comes back. The "to 0.4.0" columns were taken inside the published images, and the
+five of them, 0.1.0 to 0.4.0, print the same lines.
+
+| Written | domain | url | email | IPv6 | hash | IPv4, to 0.4.0 | IPv4, from 0.5.0 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| candidate, then a period | returned | returned | returned | returned | returned | **nothing** | returned |
+| candidate, then a hyphen | returned | returned, hyphen included | returned | returned | returned | **nothing** | returned |
+| a period, then the candidate | returned | returned | returned | nothing | returned | **nothing** | returned |
+| a hyphen, then the candidate | returned | returned | returned | returned | returned | **nothing** | returned |
+
+The IPv4 alternative carried `(?<![\w.-])` in front and `(?![\w.-])` behind. They are what keeps
+four numbers out of a longer token, and they did it by refusing the address whenever a period
+or a hyphen touched it — so `192.0.2.1.` at the end of a sentence was refused by the same test
+that refuses `1.2.3.4.5`. Nothing flagged it: the candidate was gone before `ipaddress` saw it.
+
+What tells the two apart is the character on the far side of the mark, and `[D26]` asks for
+that and nothing else:
+
+| Written | To 0.4.0 | From 0.5.0 |
+| --- | --- | --- |
+| `192.0.2.1.` then a space, the end of the text, `)`, `..` | nothing | the address |
+| `192.0.2.1-` then a space or a line break | nothing | the address |
+| `.192.0.2.1`, `...192.0.2.1`, `-192.0.2.1` | nothing | the address |
+| `192.0.2.1.example.net`, `192.0.2.1-static.example.net` | the host name, as a `domain` | the same |
+| `192.0.2.1.Next` | `192.0.2.1.next`, as a `domain` (sentence noise, SPEC §11.3) | the same |
+| `192.0.2.1.5`, `192.0.2.1-rc1` | nothing | nothing |
+| `word-192.0.2.1`, `end.192.0.2.1`, and the same after `é` or `_` | nothing | nothing |
+
+The far side is one character, and a second mark there is not a label character. That is what
+lets `a--b` and `a...b` return both ends, and it has a price: `192.0.2.1--static.example.net`
+was one host name to the domain grammar up to 0.4.0 and is the address and `static.example.net`
+from 0.5.0, as is `192.0.2.1-` at the end of a line with `static.example.net` on the next one,
+where only the tail came back before.
+
+`\w` is what "label character" means here, and in a `str` pattern it is a letter, a digit or an
+underscore **in any script**: `é-192.0.2.1` is ruled out the way `word-192.0.2.1` is. The
+alternative for a domain or a file name is ASCII-only, so after `é` or `_` nothing else would
+have swallowed the token — the lookbehind is what holds there, not an accident of the order.
+
+**Refused as an address, the same text could come back as something else.** Two of the 256
+last numbers an address can have are file extensions in the registry, `123` and `210`. Up to
+0.4.0 `192.0.2.123.` was refused by the IPv4 alternative, fell through to the one for a domain
+or a file name, and was returned as the `filename` `192.0.2.123` — and so was `192.0.2.123-`,
+`-192.0.2.123` and `.192.0.2.123`. From 0.5.0 each of them is the address, as `192.0.2.123`
+with a space on both sides always was: the alternative for an address comes first. Five numbers
+ending in such an extension, `192.0.2.1.123`, are a file name before and after, and so is a
+whole range written `a-b` whose right end ends in one.
+
+**A range** is two addresses and a relation between them, and the service returns addresses.
+What it must not do is return one end of two:
+
+| Written | To 0.4.0 | From 0.5.0 |
+| --- | --- | --- |
+| `a - b`, `a–b` (en dash) | both ends | both ends |
+| `a-b` | neither | neither |
+| `a- b` | the right end only | both ends |
+| `a -b` | the left end only | both ends |
+| `a...b`, `a..b` | neither | both ends |
+| `a:80-b:80` | the left end only | the left end only |
+| `a/32-b/32` | one `url` and the left end | the same |
+| `::ffff:a-b` | the left end, as IPv6 | the same |
+
+The middle rows are why the rule is the same on both sides of the address. Letting a period
+after the address through while a period before it still ruled it out would have turned the
+silence of `a...b` into "the left end only". The last three rows were half a range before and
+still are, and `[D26]` records them as left where they were. In the first two the right end
+lies inside a longer match of another alternative — a token that starts at the port, a URL that
+starts at the left end — and in the third the left end is returned by the IPv6 grammar, which
+does not look at what follows it.
+
+**The defanged path loses a candidate that follows a hyphen or a period**, in every grammar:
+
+| Written | Returned |
+| --- | --- |
+| `host[.]example[.]net`, `192[.]0[.]2[.]1` after a space | the candidate, `defanged` |
+| `192[.]0[.]2[.]1.` | the address, `defanged` — the period after it is trimmed |
+| `-host[.]example[.]net`, `.host[.]example[.]net` | nothing |
+| `-hxxp://example[.]net/x`, `-user[at]example[.]net`, `-192[.]0[.]2[.]1` | nothing |
+
+A defanged form is found by growing its marker outwards to the token that contains it, and a
+hyphen or a period in front is taken along as part of that token; re-armed, the token no longer
+reads as anything. The same text without the defanging is returned. This is a different
+mechanism from the one above and `[D26]` does not touch it: it is a known defect, listed in
+`CHANGELOG.md` and stated by `tests/test_known_defects.py`.

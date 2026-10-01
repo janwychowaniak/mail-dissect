@@ -1,0 +1,10 @@
+From: Alice <alice@example.net>
+To: recipient@example.net
+Subject: an address after a period
+Date: Thu, 01 Oct 2026 10:00:00 +0200
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+A period first .192.0.2.11 then text
+After an ellipsis ...192.0.2.12 then text
+Inside brackets (.192.0.2.13) then text

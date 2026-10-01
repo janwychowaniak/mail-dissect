@@ -68,7 +68,12 @@ _MASTER = re.compile(
             rf"(?P<url_bare>\b(?:www\.{_HOST}{_URL_TAIL}|{_HOST}/{_URL_TAIL}))",
             # 5/6. Loose shapes, validated by a real address parser rather than by the regex.
             r"(?P<ipv6>(?<![:.\w])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f:.]{0,45})",
-            r"(?P<ipv4>(?<![\w.-])\d{1,3}(?:\.\d{1,3}){3}(?![\w.-]))",
+            #    [D26]: a label character (`\w`: a letter, a digit or an underscore, in any
+            #    script) next to the address rules it out, and so does one on the far side
+            #    of a period or a hyphen that touches it - the head of a host name, the tail
+            #    of a version. A period or a hyphen with anything else beyond it is
+            #    punctuation, on either side.
+            r"(?P<ipv4>(?<!\w)(?<!\w[.-])\d{1,3}(?:\.\d{1,3}){3}(?!\w|[.-]\w))",
             # 7. A written-down digest.
             r"(?P<hash>\b[0-9a-fA-F]{32}(?:[0-9a-fA-F]{8})?(?:[0-9a-fA-F]{24})?(?:[0-9a-fA-F]{64})?\b)",
             # 8. A token the registries decide about: a domain, a filename, both, or neither.

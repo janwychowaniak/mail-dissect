@@ -15,8 +15,11 @@ recorded as F13 showed that the extension registry knows none of the script form
 covers the supplement introduced by `[D22]`. **Cases 67–69 were added for `[D24]`**, after a
 report against 0.2.0 showed that a folded header was read with its line break in it (F18);
 until then no case, and no fixture, had a header written across two lines. **Case 70 was added
-for `[D25]`**, from the same report: an address written inside quotes. Any further case gets
-the next free number and a line saying where it came from.
+for `[D25]`**, from the same report: an address written inside quotes. **Case 71 was added for
+`[D26]`**, after a report against 0.4.0 showed that an IPv4 address at the end of a sentence was
+not returned (F20); the sentence of case 28 has a comma or a space after each of its IPv4
+addresses, and an IPv6 address before its full stop. Any further case gets the next free number
+and a line saying where it came from.
 
 ## Functional requirements
 
@@ -113,6 +116,7 @@ the next free number and a line saying where it came from.
 | 68 | a folded address header is decomposed, and encoded-words either side of a fold are joined | §7 | `test_folding::test_a_folded_header_yields_its_value` (+ `…_a_word_cut_by_a_fold_is_one_candidate`, `…_a_folded_content_type_keeps_its_parameters`) |
 | 69 | `headers{}` is the parsed view and the `headers` artifact the record; the structured headers are the ones §7 names | §7, §13.1 | `test_folding::test_headers_are_the_parsed_view_and_the_artifact_is_the_record`, `…_the_specification_names_the_structured_headers` |
 | 70 | an address entry with no domain is read once more: `"Name <address>"` and `"address"` are decomposed, in every address header; text after the address, two addresses or no address leave the entry as it was; an entry with a domain is never touched | §7 | `test_quoted_address::test_a_saved_quoted_address`, `…_every_address_header_is_read_the_same_way`, `…_anything_less_than_one_clean_mailbox_is_left_alone`, `…_the_display_name_is_never_where_an_address_comes_from` |
+| 71 | a period or a hyphen that touches an IPv4 address is punctuation unless a label character continues on its far side: an address before or after one is returned without the mark, in a header, a text body and an HTML body; four numbers inside a longer token are not; a range returns both ends or neither | §11.2 | `test_ipv4_boundary::test_a_saved_message`, `…_every_source_is_read_by_the_same_rule`, `…_a_mark_with_no_label_character_beyond_it_is_punctuation`, `…_a_label_character_rules_the_address_out`, `…_a_range_returns_both_ends_or_neither` (+ `…_what_was_measured_and_left`) |
 
 ## Resilience
 

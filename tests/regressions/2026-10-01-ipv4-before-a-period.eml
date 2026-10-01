@@ -1,0 +1,12 @@
+From: Alice <alice@example.net>
+To: recipient@example.net
+Subject: an address before a period
+Date: Thu, 01 Oct 2026 10:00:00 +0200
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+The first host is 192.0.2.1. The sentence goes on
+The second ends a line 192.0.2.2.
+(the third sits inside brackets 192.0.2.3.)
+The fourth comes before an ellipsis 192.0.2.4... and more text
+The fifth ends the message 192.0.2.5.

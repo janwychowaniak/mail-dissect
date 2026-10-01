@@ -1,0 +1,22 @@
+From: Alice <alice@example.net>
+To: recipient@example.net
+Subject: four numbers inside a longer token
+Date: Thu, 01 Oct 2026 10:00:00 +0200
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+A host name 192.0.2.101.example.net here
+A host name 192.0.2.102-static.example.net here
+No space after the period 192.0.2.103.Next sentence
+A suffix 192.0.2.104-rc1 here
+A short range 192.0.2.105-109 here
+Five numbers 192.0.2.106.7 here
+Five numbers and a period 192.0.2.107.8. Then text
+A word and a hyphen word-192.0.2.111 here
+An underscore and a hyphen under_-192.0.2.112 here
+A letter and a hyphen café-192.0.2.113 here
+A word and a period end.192.0.2.121 here
+A number and a period 5.192.0.2.122 here
+An underscore and a period under_.192.0.2.123 here
+A letter and a period café.192.0.2.124 here

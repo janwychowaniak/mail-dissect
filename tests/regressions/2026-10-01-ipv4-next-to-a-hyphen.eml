@@ -1,0 +1,13 @@
+From: Alice <alice@example.net>
+To: recipient@example.net
+Subject: an address next to a hyphen
+Date: Thu, 01 Oct 2026 10:00:00 +0200
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Hosts:
+-192.0.2.21
+-192.0.2.22
+A hyphen after 192.0.2.23- then text
+A hyphen ends the line 192.0.2.24-
+and the next line follows

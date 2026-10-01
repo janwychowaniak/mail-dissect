@@ -517,6 +517,22 @@ without a list of schemes we happen to approve of.
 IPs are matched loosely and validated with a real IP parser. Trailing punctuation is trimmed
 from URLs by a fixed rule: strip trailing `.,;:!?"'`, then strip unbalanced `)]}>`.
 
+**What may stand next to an IPv4 address** `[D26]`. A **label character** — a letter, a digit
+or an underscore, in any script — directly before or after the address rules it out: four
+numbers inside a longer token are not an address. **A period or a hyphen that touches the
+address is punctuation, unless a label character continues on its far side**, before the
+address as well as after it. So `…is 192.0.2.1.` at the end of a sentence, `(192.0.2.1.)`,
+`192.0.2.1...`, `-192.0.2.1` in a list and `192.0.2.1-` at the end of a line all yield the
+address, without the mark; while `192.0.2.1.example.net` and `192.0.2.1-static.example.net`
+are host names and are returned as such, `192.0.2.1.5` is five numbers, and `word-192.0.2.1`
+and `end.192.0.2.1` are longer tokens. A range follows from the same rule and returns both ends
+or neither: `a - b`, `a- b`, `a -b` and `a...b` yield both addresses, `a-b` yields neither. The
+rule looks at the one character on the far side of the mark and at nothing else — no list, no
+typography. A hyphen that ends a line is punctuation like any other, so an address hard-wrapped
+off the head of a host name comes back next to the tail of that name, and so does one joined to
+the rest of a name by two hyphens, `192.0.2.1--static.example.net`: a candidate, not a verdict
+(§11.3).
+
 ### 11.3 Canonical form, defanging, ambiguity, deduplication
 
 - **Canonical next to original.** `value` is normalised: host lowercased, no trailing dot, in
@@ -961,7 +977,7 @@ corpus hits that by accident, if at all. A synthetic message aims at a specific 
 is repeatable.
 
 The suite is **offline by default** — no network, no dependency reachable — and CI depends on
-that. Seventy numbered acceptance cases are listed in
+that. Seventy-one numbered acceptance cases are listed in
 [`spec-coverage.md`](spec-coverage.md), each mapped to the section it exercises.
 
 **Resilience is a separate species of test:** a correct synthetic message is damaged
@@ -1056,6 +1072,25 @@ Approved by the maintainer, 2026-09-17.
   rule holds no list and no guess, only the parser's own verdict, and "no defect" is what
   keeps it from taking the first of two addresses or dropping the text after one (F19). The
   value as written stays in `headers`.
+- **[D26] A period or a hyphen that touches an IPv4 address is punctuation, unless a label
+  character continues on its far side.** A label character — a letter, a digit or an
+  underscore, in any script — next to the address still rules it out, and so does one beyond
+  the mark: a host name that begins with four numbers, a fifth number, the tail of a version, a
+  word joined on by a hyphen. Anything else beyond the mark leaves the address a candidate, on
+  either side of it (§11.2). Decided 2026-10-01, for 0.5.0, after a report that an address at
+  the end of a sentence was not returned: until then a period or a hyphen on either side ruled
+  the address out whatever stood beyond it, which no other grammar did (F20), and the candidate
+  was lost before the parser that validates it saw it — while §11 promises that nothing escapes
+  the list. The rule is the same on both sides because the two halves are not independent: with
+  a period let through after the address and still refused before it, a range written `a...b`
+  would have gone from silence to its left end alone, and half a range reads as a single
+  address. For the same reason `a-b` stays silent rather than returning one end. The rule holds
+  no list and no guess about typography, so it is the same for every consumer (§2). **Measured
+  and left as they were:** a range whose ends carry a port or a prefix length, or whose left
+  end is an IPv4-mapped IPv6 address, returns its left end only (`a:80-b:80`, `a/32-b/32`,
+  `::ffff:a-b`); a period directly before an IPv6 address still rules that address out; and a
+  defanged form directly after a hyphen or a period is not returned in any grammar — a defect
+  of the defanged path, listed as one in `CHANGELOG.md`, and no part of this decision.
 
 **Implementation**
 

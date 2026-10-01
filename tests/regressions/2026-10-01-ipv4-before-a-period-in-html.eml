@@ -1,0 +1,10 @@
+From: Alice <alice@example.net>
+To: recipient@example.net
+Subject: an address before a period, in html
+Date: Thu, 01 Oct 2026 10:00:00 +0200
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+<html><body><p>The host is 192.0.2.6. The sentence goes on</p></bo=
+dy></html>

@@ -1,0 +1,10 @@
+From: Alice <alice@example.net>
+To: recipient@example.net
+Subject: a range with periods
+Date: Thu, 01 Oct 2026 10:00:00 +0200
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Three periods 192.0.2.61...192.0.2.69 inclusive
+Two periods 192.0.2.71..192.0.2.79 inclusive
+A hyphen and a period 192.0.2.81-.192.0.2.89 inclusive
