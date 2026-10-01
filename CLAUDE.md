@@ -252,6 +252,13 @@ The full record is `docs/SPEC.md` §22. The ones most likely to be "improved" by
   "Restoring the value as written" in `headers{}` looks like fidelity and is a regression; the
   record is already served, byte for byte. Which headers are structured is the interpreter's
   map, pinned by `tests/pins.py` on the image's Python.
+- **[D25]** an address entry with no domain is read once more, and taken only when its local
+  part is exactly one mailbox with a domain **and no defect**. The defect is the load-bearing
+  half: for text after the address, or two addresses inside the quotes, the parser returns a
+  mailbox and a defect — one mailbox on 3.13.12, two on 3.13.15 (F19) — so a rule written on the
+  count alone takes the first of two addresses and drops the text after one, silently, on one
+  interpreter and not the other. An entry that has a domain is never read again, whatever its
+  display name looks like.
 - **[D12]** the `eml` artifact carries original bytes; never reassemble a message to produce it
   or its hashes (F1).
 - **[D13]** part and nesting limits are established before the tree is built; a limit checked
