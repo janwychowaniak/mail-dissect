@@ -143,7 +143,9 @@ that cannot be looked up, or that does not decode what it declares. Substituting
 standing where the material had bytes that do not decode, a header byte that is not UTF-8
 among them `[D20]`. Material that reads without loss does not raise it, whichever path it
 took — raw UTF-8 in a header, say — because a flag that also fires where nothing happened
-teaches its consumer to ignore it exactly when it starts to matter.
+teaches its consumer to ignore it exactly when it starts to matter. **What the service does not
+read does not raise it either:** a plain name beside the RFC 2231 form that is read in its place
+(§6.4). The same header on a message is read by `headers{}`, and raises it there.
 
 The reason is practical, not aesthetic: a field with an open value set — or a bag with a
 neutral name such as `facts`, `extras` or `meta` — accumulates consumer policy over time,
@@ -253,6 +255,10 @@ a name is served.
   declares — the plain form beside it is the name, and `encoding_fallback` says so (§5.1). With
   no plain form beside it, the name is what the standard library makes of it, reported the same
   way.
+- **A plain form that is not read is not reported.** Where the RFC 2231 form is the name, the
+  plain one beside it is not read, and an encoded-word in it that would not have read cleanly
+  raises nothing (§5.1). Where the header is the message's own, `headers{}` reads all of it, and
+  the flag is raised there.
 - **White space at either end is not part of the name; a period is.** `archive.exe.` keeps its
   final period and `.profile` its first.
 - **`extension`** is the text after the last period of the name's last path component (after the

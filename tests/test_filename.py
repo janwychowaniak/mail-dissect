@@ -183,6 +183,32 @@ def test_an_unreadable_charset_form_gives_way_to_the_plain_one_and_says_so(
     assert body["flags"] == flags
 
 
+def test_the_flag_describes_what_was_read(client: TestClient) -> None:
+    """SPEC §5.1, §6.4: a plain form beside the RFC 2231 form that is read is not read itself.
+
+    On a part nothing else reads it, so an encoded-word in it that would not read cleanly raises
+    nothing. The same header on the message is read by `headers{}`, which raises the flag there.
+    The control is the plain form alone, which is the name, and is flagged on a part too.
+    """
+    unreadable = '"=?x-unknown-charset?Q?plain?=.pdf"'
+    both = f"attachment; filename={unreadable}; filename*=utf-8''r%C3%A9sum%C3%A9.pdf"
+    on_a_part = _named(client, both)
+    assert on_a_part["messages"][0]["attachments"][0]["filename"] == "résumé.pdf"
+    assert on_a_part["flags"] == []
+    raw = b.message(
+        {
+            "From": "a@example.net",
+            "Content-Type": "application/octet-stream",
+            "Content-Disposition": both,
+        },
+        body=b"payload",
+    )
+    on_the_message = dissect(client, raw)
+    assert on_the_message["messages"][0]["attachments"][0]["filename"] == "résumé.pdf"
+    assert on_the_message["flags"] == ["encoding_fallback"]
+    assert _named(client, f"attachment; filename={unreadable}")["flags"] == ["encoding_fallback"]
+
+
 @pytest.mark.parametrize(
     ("disposition", "name"),
     [
@@ -217,10 +243,16 @@ def test_white_space_at_the_ends_goes_and_a_period_stays(
         ("archive.exe.", None),
         ("name.", None),
         ("...", None),
-        # The last path component is the one that counts, as for `pathlib`.
+        # The last path component is the one that counts, as for `pathlib`, after a `/` or a
+        # `\\` alike: the sender's system is unknown. `filename` keeps the path as written.
         ("dir.d/file", None),
         ("../../etc/passwd", None),
         ("C:\\temp.d\\notes.PDF", "pdf"),
+        ("C:\\temp.d\\notes", None),
+        ("dir.d/", None),
+        ("dir.d\\", None),
+        ("dir/.profile", None),
+        ("dir/.a.b", "b"),
     ],
 )
 def test_the_extension_follows_the_last_period_of_the_last_component(
