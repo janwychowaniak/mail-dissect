@@ -415,6 +415,28 @@ Whether the containerd image store behaves differently is untested. The practica
 not depend on it: compare the **checksum of the archive** on both sides, since that is the
 artifact both sides actually hold.
 
+**The image Id does survive the round trip**, measured **2026-10-03**: archives of 0.5.0 and
+0.4.0, each saved by its tag on Docker 29.1.3, loaded into an isolated Docker 28.5.2
+(`docker:28-dind`) whose store was checked to be empty first — no images, and `inspect` of the
+tag failing. Each loaded with its tag and **the same Id as at the source**, and with
+`RepoDigests` empty, as above. The control is the other archive: it loaded as the other Id, so
+the comparison can tell two images apart. The Id is the digest of the image's configuration,
+and the archive carries that file byte for byte (`manifest.json` names it as `Config`); the
+registry's digest is a digest of a manifest the archive does not contain.
+
+**The Id identifies bytes, not a recipe.** The same build context built again gave the same Id
+with the builder's cache — the same bytes, reused — and a different one with `--no-cache`. So
+an Id cannot be reproduced by building; it can only be compared with what was published. Since
+0.6.0 the release workflow attaches the archive to the release, and runs this same round trip
+on it before it does (`.github/scripts/archive-image.sh`).
+
+Two traps on the way. Copying the archive into `/tmp` of the `dind` container reported success
+and left nothing to load, because the container's entrypoint mounts a tmpfs over `/tmp` after
+the copy lands beneath it; the archive went in through standard input instead. And a stopped
+container does not stop `docker rmi --force`: the image record goes, `inspect` fails, and a
+`load` restores it, so a removal has to be checked by `inspect` rather than assumed from a
+container that might hold it. A running container does stop it.
+
 ## F17 — `compat32` hands an 8-bit header value out as a `Header`, not a string
 
 | Policy | `msg["X-Ok"]`, ASCII (control) | `msg["Subject"]`, `msg["To"]`, one byte `\xe9` |

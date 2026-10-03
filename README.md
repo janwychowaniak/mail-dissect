@@ -315,6 +315,21 @@ old metadata in place and reads as "the digest survived". Whether the containerd
 behaves differently is untested. Compare the checksum of the archive instead — it is the
 artifact both sides actually hold.
 
+**From 0.6.0 every release carries the service image as a file**: `mail-dissect-<version>.tar.gz`,
+saved by its full tag, with `mail-dissect-<version>.tar.gz.sha256` beside it. On the target host:
+
+```bash
+sha256sum -c mail-dissect-0.6.0.tar.gz.sha256
+docker load -i mail-dissect-0.6.0.tar.gz
+docker image inspect --format '{{.Id}}' ghcr.io/janwychowaniak/mail-dissect:0.6.0
+```
+
+The last line must print the image Id published with the release, in `CHANGELOG.md`. **The Id
+survives the transfer where the digest does not**: it is the digest of the image's
+configuration, which the archive carries byte for byte, and the release workflow loads every
+archive back into an empty store and compares the Id before it attaches the file (F16). The
+tools are not in that file; they still travel as above.
+
 The minimal Tika image is the right one here: extracting text from office documents does not
 need OCR, and every extra parser is more surface reading a hostile file.
 

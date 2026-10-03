@@ -244,9 +244,17 @@ measurements by someone other than its author before the tag exists, because it 
 corrected afterwards (two lines of 0.5.0's were); the tag goes out only after CI is green on the
 commit it points at; the release workflow runs the pins on the image it built and pushes nothing
 if they fail; the digest is read from two places that must agree — the release workflow's push
-and a pull of the tag — and recorded in the README and `CHANGELOG.md`; and the published image
-is run against the previous one on an input from each line of the notes, the previous version
-being the control.
+and a pull of the tag — and recorded in the README and `CHANGELOG.md`; the image Id likewise,
+from the workflow's summary and from loading the release's own archive into an empty store, and
+recorded in full `sha256:` form next to the digest; and the published image is run against the
+previous one on an input from each line of the notes, the previous version being the control.
+
+**The release files are the published image, by its full tag, and its checksum.** The
+workflow's `archive` job pulls what was pushed by its digest, saves it, loads it back into an
+empty store and compares the Id (`.github/scripts/archive-image.sh`, F16) before it attaches the
+two files. It is the only job with `contents: write`, and it runs after the push: when it fails,
+re-run that job alone. Re-running the whole workflow builds and pushes again, and can publish
+the same version under another digest — the same reason a tag is never pushed twice.
 
 **An "unchanged" line in the notes is a negative result**, and needs what every negative result
 needs: an input on which the change would show if it were there. "`received[]` does not
