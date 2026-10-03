@@ -2,7 +2,9 @@
 
 `headers{}` and `addresses{}` are the standard library's header parser at work `[D24]`, and
 that parser moves between patch releases of Python: what it makes of a malformed address was
-one mailbox on 3.13.12 and two on 3.13.15, with the same defect either way `[D25]`. So these
+one mailbox on 3.13.12 and two on 3.13.15, with the same defect either way `[D25]`. A part's
+name is read with the same library `[D27]`, and the grammar it was once read with dropped the
+white space between two encoded-words on 3.13.15 and kept it on 3.13.12 (F21). So these
 expectations have two homes: the suite runs them on the developer's interpreter, and CI runs
 this file inside the built image, on the interpreter that is actually published:
 
@@ -282,6 +284,89 @@ QUOTED: tuple[Quoted, ...] = (
     ),
 )
 
+
+@dataclass(frozen=True)
+class Named:
+    """One saved message whose parts carry names, and what is read out of them."""
+
+    file: str
+    # (part index, `filename`, `extension`) for every part that has a name, in order.
+    names: list[tuple[int, str | None, str | None]]
+    flags: list[str] = field(default_factory=list)
+    # `headers{}["content-disposition"]` of the message itself, where the message is the part:
+    # the parser's view `[D24]`, which `[D27]` does not bind and says where it may differ.
+    disposition_view: str | None = None
+
+    @property
+    def raw(self) -> bytes:
+        return (REGRESSIONS / self.file).read_bytes()
+
+
+# `[D27]`: the plain form loses the white space between two adjacent encoded-words and nothing
+# else; the RFC 2231 form wins wherever it stands, is read in its charset and no further, and
+# gives way to the plain one, reported, when its charset is not taken; white space at the ends
+# goes and a period stays.
+NAMED: tuple[Named, ...] = (
+    Named(
+        "2026-10-03-filename-two-encoded-words.eml",
+        [(2, "naïve-notes.txt", "txt"), (3, "naïve-notes.txt", "txt")],
+    ),
+    Named(
+        "2026-10-03-filename-encoded-words-in-continuations.eml",
+        [
+            (2, "naïve-notes.txt", "txt"),
+            (3, "naïve-notes.txt", "txt"),
+            (4, "naïve-notes.txt", "txt"),
+        ],
+    ),
+    Named(
+        "2026-10-03-filename-parameter-text-after-an-encoded-word.eml",
+        [
+            (2, "résumé;v2.pdf", "pdf"),
+            (3, "résumé;x=y.pdf", "pdf"),
+            (4, "résumé;filename=other.pdf", "pdf"),
+            (5, 'résumé".pdf', "pdf"),
+        ],
+    ),
+    Named(
+        "2026-10-03-filename-written-twice.eml",
+        [
+            (2, "résumé-one.pdf", "pdf"),
+            (3, "résumé-two.pdf", "pdf"),
+            (4, "résumé-three.pdf", "pdf"),
+            # The control: `Content-Disposition` is read before `Content-Type`, in any form.
+            (5, "disposition.pdf", "pdf"),
+        ],
+    ),
+    Named(
+        "2026-10-03-filename-charset-form-holding-an-encoded-word.eml",
+        [
+            (2, "=?utf-8?Q?r=C3=A9sum=C3=A9?=.pdf", "pdf"),
+            (3, "naïve-=?utf-8?Q?notes?=.txt", "txt"),
+        ],
+    ),
+    Named(
+        "2026-10-03-filename-unreadable-charset-form-beside-a-plain-one.eml",
+        [(2, "fallback.pdf", "pdf")],
+        flags=["encoding_fallback"],
+    ),
+    Named(
+        "2026-10-03-filename-edges.eml",
+        [
+            (2, "notes.pdf", "pdf"),
+            (3, "résumé.pdf", "pdf"),
+            (4, "archive.exe.", None),
+            (5, ".profile", None),
+        ],
+    ),
+    Named(
+        "2026-10-03-filename-on-the-message-itself.eml",
+        [(0, "naïve-notes.txt", "txt")],
+        disposition_view='attachment; filename="naïve-no tes.txt"',
+    ),
+)
+
+
 _FOLD = re.compile(rb"\r?\n([ \t])")
 _BYTE_FACTS = {"size", "md5", "sha1", "sha256"}
 
@@ -373,6 +458,22 @@ def check_quoted(case: Quoted, dissect: Dissect) -> None:
     assert message["headers"][case.header] == [case.written], case.file
 
 
+def check_named(case: Named, dissect: Dissect) -> None:
+    """Every place the service shows a part's name shows the one reading of it."""
+    body = dissect(case.raw)
+    message = body["messages"][0]
+    attachments = {item["part_index"]: item for item in message["attachments"]}
+    for index, filename, extension in case.names:
+        got = message["mime_parts"][index]["filename"]
+        assert got == filename, (case.file, index, got)
+        assert attachments[index]["filename"] == filename, (case.file, index)
+        assert attachments[index]["extension"] == extension, (case.file, index)
+    assert body["flags"] == case.flags, (case.file, body["flags"])
+    if case.disposition_view is not None:
+        view = message["headers"]["content-disposition"]
+        assert view == [case.disposition_view], (case.file, view)
+
+
 def main() -> int:
     from fastapi.testclient import TestClient
 
@@ -399,6 +500,8 @@ def main() -> int:
                 checks.append((f"twin   {case.file}", lambda c=case: check_twin(c, dissect)))
             for quoted in QUOTED:
                 checks.append((f"quoted {quoted.file}", lambda q=quoted: check_quoted(q, dissect)))
+            for named in NAMED:
+                checks.append((f"named  {named.file}", lambda n=named: check_named(n, dissect)))
             for label, check in checks:
                 ran += 1
                 try:

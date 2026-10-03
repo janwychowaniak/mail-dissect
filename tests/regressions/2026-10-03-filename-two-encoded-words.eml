@@ -1,0 +1,23 @@
+From: Sender <sender@example.net>
+To: recipient@example.org
+Subject: a name written as two encoded-words
+Date: Sat, 03 Oct 2026 10:00:00 +0200
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=BOUNDARY
+
+--BOUNDARY
+Content-Type: text/plain; charset=utf-8
+
+The attachments carry the names this message is about.
+--BOUNDARY
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="=?utf-8?B?bmHDr3ZlLW5v?= =?utf-8?B?dGVzLnR4dA==?="
+
+payload
+--BOUNDARY
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="=?utf-8?B?bmHDr3ZlLW5v?=
+ =?utf-8?B?dGVzLnR4dA==?="
+
+payload
+--BOUNDARY--

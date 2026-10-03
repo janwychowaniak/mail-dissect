@@ -227,6 +227,53 @@ The split follows from a single walk, with no `Content-Disposition` criterion:
 - The same rule yields, with no special case, that **a nested message is an attachment** of its
   parent: it is a part, it is not a container, and it is not the body.
 
+### 6.4 A part's name
+
+`mime_parts[].filename` and `attachments[].filename` are the part's name as the message wrote
+it, read once and by one rule `[D27]`, and not yet made safe for anything: §13.3 does that when
+a name is served.
+
+- **Where it comes from.** `filename` in `Content-Disposition`; `name` in `Content-Type` only
+  where the first is not written at all.
+- **Which form.** A parameter may be written plain (`filename="…"`) or in the form of RFC 2231:
+  with a charset (`filename*=utf-8''…`), continued over several segments (`filename*0=`,
+  `filename*1=`, …), or both. **The RFC 2231 form wins wherever it stands** — the plain one
+  beside it is a stand-in for readers that do not know RFC 2231. A second plain one is ignored.
+- **The plain form** — and a continued one with no charset in any segment, its segments joined
+  as written with nothing put between them — is read as unstructured text. RFC 2047 decoding
+  drops the white space between two adjacent encoded-words (§6.2 of that RFC), whether it stood
+  at a segment boundary, at a fold or nowhere at all, and **everything else stays as written**
+  once the quoted string's own escapes are removed: a `;` and what follows it, a `=`, a
+  parenthesis, a quotation mark, two spaces, a space inside one encoded-word. An encoded-word
+  inside a quoted string is not what RFC 2047 allows, but it is common (F4).
+- **The form with a charset** — a set of segments any one of which declares a charset is that
+  form as a whole — is percent-decoded in the declared charset, its other segments taken as
+  written, and read no further: text in it that looks like an encoded-word is part of the name.
+- **When that charset is not taken** — it cannot be looked up, or it does not decode what it
+  declares — the plain form beside it is the name, and `encoding_fallback` says so (§5.1). With
+  no plain form beside it, the name is what the standard library makes of it, reported the same
+  way.
+- **White space at either end is not part of the name; a period is.** `archive.exe.` keeps its
+  final period and `.profile` its first.
+- **`extension`** is the text after the last period of the name's last path component (after the
+  last `/` or `\`), lowercased, when that period is neither the component's first character
+  nor its last, and `null` otherwise — `pathlib`'s convention. `notes.PDF` has `pdf`, `a.b.c`
+  has `c`, and `notes`, `.profile` and `archive.exe.` have none: a final period is read from
+  `filename`, which keeps it.
+- **The result does not depend on the interpreter.** The grammar is the standard library's own
+  for unstructured text, and `tests/pins.py` holds the saved names on the interpreter the image
+  ships, as it holds the header values of §7.
+
+**One reading, wherever the service shows a name.** `mime_parts[].filename` and
+`attachments[].filename` are the same value; `artifacts[].filename` and the name in the
+`Content-Disposition` of a served artifact are that value after the sanitising of §13.3 and
+nothing else. `headers{}["content-disposition"]` of a message that is itself the part is the
+parser's view of the header `[D24]`, not this reading, and the two may differ: the parser keeps
+the white space between two encoded-words at a segment boundary, takes the first of two forms
+written, keeps white space at the ends, and shows one parameter where two were written. The
+header as written is in the `headers` artifact. No flag marks the difference, because nothing
+was substituted.
+
 ## 7. Headers
 
 - `headers` carries **every** header, names lowercased, values as a list in order of
@@ -688,8 +735,14 @@ the response must not repeat anything the message said.
   sender nor the one detected from content. Serving `text/html` from the service's own origin
   is a script ready to run in its context.
 - **`Content-Disposition: attachment` always**, with a **sanitised** filename: no control
-  characters (a `CR`/`LF` injection breaks headers apart), no paths, encoded per RFC 6266 and
-  trimmed to a sane length. The standard library does not strip paths for us (F4).
+  characters (a `CR`/`LF` injection breaks headers apart); no paths — everything up to the last
+  `/` or `\` goes, and a drive letter with it; runs of white space collapsed to one space;
+  spaces and periods at either end removed; trimmed to 100 characters, keeping an extension of
+  up to ten; and encoded per RFC 6266, with an ASCII fallback. The standard library does not
+  strip paths for us (F4). `artifacts[].filename` is the same sanitised name.
+- **The served name differs from `attachments[].filename` by exactly this sanitising** and is
+  made from it alone (§6.4). A consumer who wants the name as a fact reads it from the
+  dissection response, not from the header of a download.
 - **`X-Content-Type-Options: nosniff`**, so the browser does not guess the type on our behalf.
 
 A consumer who wants to know the real type has `declared_mime` and `detected_mime` in the
@@ -1091,6 +1144,29 @@ Approved by the maintainer, 2026-09-17.
   `::ffff:a-b`); a period directly before an IPv6 address still rules that address out; and a
   defanged form directly after a hyphen or a period is not returned in any grammar — a defect
   of the defanged path, listed as one in `CHANGELOG.md`, and no part of this decision.
+- **[D27] A part's name is read by one rule, which says what the result is.** `filename`, or
+  `name` where it is missing; the RFC 2231 form wins wherever it stands; the plain form is
+  read as unstructured text, losing the white space between two adjacent encoded-words and
+  nothing else; the form with a charset is read in that charset and no further, and gives way
+  to the plain one, reported as `encoding_fallback`, when the charset is not taken; white space
+  at the ends goes and a period stays; `extension` follows `pathlib`. The name is shown the
+  same in every field that carries it, and `headers{}` stays the parser's view (§6.4). Decided
+  2026-10-03, for 0.6.0. The specification had said nothing about the name, and the code was
+  documented as reading it with `policy.default` while it gave the bare name to the parser of
+  `Content-Disposition`. That parser fails at the first `=` and recovers through the grammar
+  of a display name, which rewrote a `;` and what followed it as a parameter — `résumé; x="y.pdf"`
+  for `résumé;x=y.pdf`, with the extension `pdf"` — on every interpreter, and dropped the white
+  space between two encoded-words on 3.13.15 but not on 3.13.12, so the published images were
+  right about the second only by a correction in Python that nothing pinned (F21). The rule is
+  written as its result rather than as "what `policy.default` does", because `policy.default`
+  keeps the white space between encoded-words at a segment boundary, decodes nothing that came
+  through a charset, and takes whichever of two forms comes first. The name is a fact about
+  the material: one that differs from what was written breaks, without a signal, every
+  comparison with the same name written elsewhere. **Changed with it:** two forms — the RFC 2231
+  one was ignored whenever a plain one was written; a charset form whose text looks like an
+  encoded-word — it was decoded a second time; an unreadable charset form beside a plain one —
+  it now raises the flag; white space at the ends of a decoded name — it was kept; and
+  `extension` of a name that starts with a period — `.profile` had `profile`.
 
 **Implementation**
 

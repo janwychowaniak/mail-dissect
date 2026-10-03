@@ -1,0 +1,17 @@
+From: Sender <sender@example.net>
+To: recipient@example.org
+Subject: a name whose charset form cannot be read, beside a plain one
+Date: Sat, 03 Oct 2026 10:00:00 +0200
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=BOUNDARY
+
+--BOUNDARY
+Content-Type: text/plain; charset=utf-8
+
+The attachments carry the names this message is about.
+--BOUNDARY
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="fallback.pdf"; filename*=x-unknown-charset''r%E9sum%E9.pdf
+
+payload
+--BOUNDARY--

@@ -1,0 +1,27 @@
+From: Sender <sender@example.net>
+To: recipient@example.org
+Subject: encoded-words in the segments of a continued name
+Date: Sat, 03 Oct 2026 10:00:00 +0200
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=BOUNDARY
+
+--BOUNDARY
+Content-Type: text/plain; charset=utf-8
+
+The attachments carry the names this message is about.
+--BOUNDARY
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename*0="=?utf-8?B?bmHDr3ZlLW5v?= "; filename*1="=?utf-8?B?dGVzLnR4dA==?="
+
+payload
+--BOUNDARY
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename*0="=?utf-8?B?bmHDr3ZlLW5v?="; filename*1=" =?utf-8?B?dGVzLnR4dA==?="
+
+payload
+--BOUNDARY
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename*0="=?utf-8?B?bmHDr3ZlLW5v?="; filename*1="=?utf-8?B?dGVzLnR4dA==?="
+
+payload
+--BOUNDARY--

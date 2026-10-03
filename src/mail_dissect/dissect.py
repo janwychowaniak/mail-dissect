@@ -449,6 +449,22 @@ def _build_part(info: PartInfo, assembly: _Assembly) -> MimePartOut:
     )
 
 
+def _extension(name: str | None) -> str | None:
+    """The text after the last period of the name's last path component, lowercased, when that
+    period is neither the component's first character nor its last (SPEC §6.4, `[D27]`).
+
+    `pathlib`'s convention: `.profile` has no extension, nor has `archive.exe.`, and `a.b.c` has
+    `c`. The period at the end is not lost: it stays in `filename`, which is the fact.
+    """
+    if not name:
+        return None
+    last = name.replace("\\", "/").rsplit("/", 1)[-1]
+    period = last.rfind(".")
+    if period <= 0 or period == len(last) - 1:
+        return None
+    return last[period + 1 :].lower()
+
+
 def _build_attachment(info: PartInfo, assembly: _Assembly, message_index: int) -> AttachmentOut:
     artifact_id = None
     if info.payload is not None:
@@ -460,15 +476,12 @@ def _build_attachment(info: PartInfo, assembly: _Assembly, message_index: int) -
             filename=info.filename or f"part-{info.index}.bin",
         )
     name = assembly.text(info.filename) if info.filename else None
-    extension = None
-    if name and "." in name:
-        extension = name.rsplit(".", 1)[-1].lower() or None
     return AttachmentOut(
         part_index=info.index,
         artifact_id=artifact_id,
         text_artifact_id=None,  # filled in stage 5, when the text extractor is wired
         filename=name,
-        extension=extension,
+        extension=_extension(name),
         disposition=assembly.text(info.disposition) if info.disposition else None,
         content_id=assembly.text(info.content_id) if info.content_id else None,
         declared_mime=assembly.text(info.content_type),

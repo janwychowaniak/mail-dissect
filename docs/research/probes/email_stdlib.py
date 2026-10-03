@@ -2,7 +2,7 @@
 
 Run:  python3.13 docs/research/probes/email_stdlib.py
 
-Findings F1 to F10 and F17 to F19 in ../NOTES.md are produced by one function each here.
+Findings F1 to F10, F17 to F19 and F21 in ../NOTES.md are produced by one function each here.
 The probes are read-only, offline, and depend on nothing but the standard library, so
 anyone can re-run them against a newer interpreter and see whether a finding still
 holds. Print output is the evidence; keep it terse enough to paste.
@@ -411,6 +411,46 @@ def f19_an_address_written_inside_quotes() -> None:
             print(f"    local part read again: {len(boxes)} mailbox(es) {boxes} defects={defects}")
 
 
+def f21_a_filename_read_by_three_grammars() -> None:
+    """A name with encoded-words: the grammar of `Content-Disposition` given the bare name, the
+    grammar of unstructured text, and `policy.default`'s own reading of the parameter."""
+    _banner("F21", "a filename read by three grammars")
+    registry = HeaderRegistry()
+    resume = "=?utf-8?Q?r=C3=A9sum=C3=A9?="
+    names = {
+        "two words": "=?utf-8?Q?na=C3=AFve-no?= =?utf-8?Q?tes.txt?=",
+        "split in extension": "=?utf-8?Q?notes.t?= =?utf-8?Q?xt?=",
+        "word ;v2": f"{resume};v2.pdf",
+        "word ;x=y": f"{resume};x=y.pdf",
+        'word \\"': f'{resume}".pdf',
+        "word, text": f"{resume} notes.pdf",
+    }
+    print("the bare name given to the registry:")
+    for label, name in names.items():
+        as_disposition = str(registry("content-disposition", name))
+        as_unstructured = str(registry("x-filename", name))
+        print(f"  {label:20s} disposition={as_disposition!r}  unstructured={as_unstructured!r}")
+    words = "=?utf-8?Q?na=C3=AFve-no?= =?utf-8?Q?tes.txt?="
+    parameters = {
+        "continued, ws at boundary": 'filename*0="=?utf-8?Q?na=C3=AFve-no?= "; '
+        'filename*1="=?utf-8?Q?tes.txt?="',
+        "charset form, word inside": "filename*=utf-8''%3D%3Futf-8%3FQ%3Fx%3F%3D.pdf",
+        "plain, then charset form": "filename=\"plain.pdf\"; filename*=utf-8''r%C3%A9sum%C3%A9.pdf",
+        "charset form, then plain": "filename*=utf-8''r%C3%A9sum%C3%A9.pdf; filename=\"plain.pdf\"",
+        "white space, periods": 'filename=" .notes. "',
+        "two words, plain": f'filename="{words}"',
+    }
+    print("the parameter, read by each policy:")
+    for label, params in parameters.items():
+        raw = f"Content-Disposition: attachment; {params}".encode() + CRLF + CRLF + b"x" + CRLF
+        compat32 = message_from_bytes(raw, policy=email.policy.compat32).get_filename()
+        default = message_from_bytes(raw, policy=email.policy.default)
+        print(
+            f"  {label:26s} compat32={compat32!r}  default={default.get_filename()!r}  "
+            f"default header={str(default['content-disposition'])!r}"
+        )
+
+
 def main() -> int:
     print(f"python {sys.version}")
     f1_nested_reserialisation_is_not_byte_identical()
@@ -426,6 +466,7 @@ def main() -> int:
     f17_compat32_hands_out_a_header_object()
     f18_the_registry_does_not_unfold()
     f19_an_address_written_inside_quotes()
+    f21_a_filename_read_by_three_grammars()
     return 0
 
 

@@ -18,8 +18,11 @@ until then no case, and no fixture, had a header written across two lines. **Cas
 for `[D25]`**, from the same report: an address written inside quotes. **Case 71 was added for
 `[D26]`**, after a report against 0.4.0 showed that an IPv4 address at the end of a sentence was
 not returned (F20); the sentence of case 28 has a comma or a space after each of its IPv4
-addresses, and an IPv6 address before its full stop. Any further case gets the next free number
-and a line saying where it came from.
+addresses, and an IPv6 address before its full stop. **Cases 72–73 were added for `[D27]`**, after
+a measurement on the published 0.5.0 image showed that a `;` after an encoded-word in a name
+was rewritten as a parameter, and that two encoded-words in a name were joined only because the
+image's Python happened to join them (F21); until then no case said how a part's name is read.
+Any further case gets the next free number and a line saying where it came from.
 
 ## Functional requirements
 
@@ -117,6 +120,8 @@ and a line saying where it came from.
 | 69 | `headers{}` is the parsed view and the `headers` artifact the record; the structured headers are the ones §7 names | §7, §13.1 | `test_folding::test_headers_are_the_parsed_view_and_the_artifact_is_the_record`, `…_the_specification_names_the_structured_headers` |
 | 70 | an address entry with no domain is read once more: `"Name <address>"` and `"address"` are decomposed, in every address header; text after the address, two addresses or no address leave the entry as it was; an entry with a domain is never touched | §7 | `test_quoted_address::test_a_saved_quoted_address`, `…_every_address_header_is_read_the_same_way`, `…_anything_less_than_one_clean_mailbox_is_left_alone`, `…_the_display_name_is_never_where_an_address_comes_from` |
 | 71 | a period or a hyphen that touches an IPv4 address is punctuation unless a label character continues on its far side: an address before or after one is returned without the mark, in a header, a text body and an HTML body; four numbers inside a longer token are not; a range returns both ends or neither | §11.2 | `test_ipv4_boundary::test_a_saved_message`, `…_every_source_is_read_by_the_same_rule`, `…_a_mark_with_no_label_character_beyond_it_is_punctuation`, `…_a_label_character_rules_the_address_out`, `…_a_range_returns_both_ends_or_neither` (+ `…_what_was_measured_and_left`) |
+| 72 | a part's name is read by one rule: `filename`, else `name`; the RFC 2231 form wins wherever it stands; the plain form loses the white space between two adjacent encoded-words and nothing else; the charset form is read no further and gives way to the plain one, flagged, when its charset is not taken; white space at the ends goes, a period stays; `artifacts[].filename` and the served name are that reading after §13.3 alone | §6.4, §13.3 | `test_filename::test_a_saved_name`, `…_the_plain_form_is_read_as_unstructured_text`, `…_the_rfc2231_form_wins_wherever_it_stands`, `…_a_name_declared_with_a_charset_is_read_no_further`, `…_an_unreadable_charset_form_gives_way_to_the_plain_one_and_says_so`, `…_white_space_at_the_ends_goes_and_a_period_stays`, `…_the_served_name_is_the_reading_after_sanitising_and_nothing_else` |
+| 73 | `extension` is the text after the last period of the name's last path component, lowercased, when that period is neither its first character nor its last: `.profile` and `archive.exe.` have none | §6.4 | `test_filename::test_the_extension_follows_the_last_period_of_the_last_component` |
 
 ## Resilience
 
@@ -127,7 +132,7 @@ and a line saying where it came from.
 | Every finding becomes a permanent test | §18 | `test_fuzz::test_saved_findings_stay_fixed` over `tests/regressions/` |
 | A byte above 0x7F in any header, the message's or a part's, is dissected, never a 500 | §18 | `test_fuzz::test_a_non_ascii_byte_in_any_header_is_dissected`, mutator `non_ascii_header_bytes` |
 | A folded header line, the message's or a part's, is part of what the fuzzer sends | §18 | mutator `fold_header_lines` |
-| What is read out of a header holds on the interpreter the image ships: the registry's map, the values of the saved folded messages, and the verdicts on the saved quoted addresses | §7, `[D24]`, `[D25]` | `tests/pins.py`, run by `test_folding` and inside the image by the CI `container` job |
+| What is read out of a header holds on the interpreter the image ships: the registry's map, the values of the saved folded messages, the verdicts on the saved quoted addresses, and the names of the saved parts | §7, §6.4, `[D24]`, `[D25]`, `[D27]` | `tests/pins.py`, run by `test_folding`, `test_quoted_address` and `test_filename`, and inside the image by the CI `container` job |
 | `received[]`, `auth[]` and `encoding_fallback` do not depend on where a header was folded | §7, §5.1 | `test_folding::test_received_is_decomposed_the_same_folded_or_not`, `…_authentication_results_are_decomposed_the_same_folded_or_not`, `…_a_folded_address_header_reports_what_its_unfolded_twin_reports` |
 | The extractor gets the declared type only when a request header can carry it | §14.1 | `test_tools::test_the_extractor_gets_a_type_a_header_can_carry` |
 | `encoding_fallback` fires when a declaration is not taken or something is substituted, and only then | §5.1, §7.2, `[D20]` | `test_intake::test_an_eight_bit_header_byte_is_replaced_and_reported`, `…_flagged_only_when_reading_it_fell_back`, `…_raw_utf8_in_an_address_is_read_without_loss`, `…_non_ascii_byte_in_a_part_header_is_read_and_served`, `…_filename_is_flagged_only_when_its_declaration_fails` |

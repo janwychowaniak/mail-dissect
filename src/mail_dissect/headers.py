@@ -9,14 +9,17 @@ and it is given unfolded values, because unfolding is the policy's job and not i
 from __future__ import annotations
 
 import codecs
+import email.message
 import ipaddress
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from email.headerregistry import Address as StdlibAddress
 from email.headerregistry import AddressHeader, HeaderRegistry, UniqueAddressHeader
 from email.message import Message
 from email.parser import BytesHeaderParser
 from email.policy import Compat32
+from email.utils import collapse_rfc2231_value, decode_params, unquote
 
 from .models import substituted
 
@@ -126,26 +129,94 @@ def _known_charset(name: str | None) -> bool:
 
 
 def filename_of(part: Message) -> tuple[str | None, bool]:
-    """The attachment's name as the message wrote it — not yet sanitised — and whether reading
-    it fell back (SPEC §5.1).
+    """The part's name as the message wrote it — not yet sanitised — and whether reading it
+    fell back (SPEC §6.4, §5.1, `[D27]`).
 
-    `policy.default` is used only for this one value: it is the only policy that decodes an
-    RFC 2047 encoded-word inside a filename, which is non-standard but common (F4). Neither
-    policy strips path components, so that stays the service's job (SPEC §13.3). An RFC 2231
-    name declares a charset too: the standard library reads a charset it cannot look up as some
-    other one, and bytes that do not decode as U+FFFD, and says nothing about either.
+    `filename` in `Content-Disposition` is the name, and `name` in `Content-Type` only where
+    the first is not written at all. Within one header the RFC 2231 form, in any of its shapes,
+    wins over the plain one wherever it stands — unless its declared charset is not taken, and
+    then the plain one is read and the fallback reported.
+
+    The plain form is read as unstructured text: the white space between two adjacent
+    encoded-words goes (RFC 2047 §6.2) and everything else stays as written. An encoded-word
+    inside a quoted string is non-standard but common (F4). The form with a charset is decoded
+    in that charset and read no further. Path components stay: that is the service's job
+    when it serves the name (SPEC §13.3).
     """
-    declared = part.get_param("filename", None, "content-disposition")
-    if declared is None:
-        declared = part.get_param("name", None, "content-type")
-    fell_back = isinstance(declared, tuple) and not _decodes(declared[0], declared[2])
-    name = part.get_filename()
-    if not name:
-        return None, fell_back
-    if "=?" in name:
-        name, word_fell_back = _read("content-disposition", name)
-        fell_back = fell_back or word_fell_back
-    return name or None, fell_back
+    for header, param in (("content-disposition", "filename"), ("content-type", "name")):
+        plain, extended = _written_name(part, header, param)
+        if isinstance(extended, tuple):
+            # A charset was declared. The standard library reads one it cannot look up as some
+            # other charset, and bytes that do not decode as U+FFFD, and says nothing about
+            # either, so whether the declaration holds is asked here.
+            if _decodes(extended[0], extended[2]):
+                return _edges(collapse_rfc2231_value(extended)), False
+            if plain is None:
+                return _edges(collapse_rfc2231_value(extended)), True
+            return _plain_name(plain)[0], True
+        if extended is not None:
+            return _plain_name(extended)
+        if plain is not None:
+            return _plain_name(plain)
+    return None, False
+
+
+# A name the header registry has no class for, so a value read under it is unstructured text:
+# the grammar of `Subject`. The grammar of the header the name came from is not the one: given
+# the bare name as a `Content-Disposition` value, its parser fails at the first `=`, recovers
+# through the grammar of a display name, and rewrites a `;` and what follows it as a parameter
+# of its own — and whether it drops the white space between two encoded-words depends on the
+# patch release of Python (F21).
+_UNSTRUCTURED = "x-mail-dissect-filename"
+
+# How `Message.get_params` splits a header into its parameters, quotes and all. It has no
+# public name; the names it keeps are what `_written_name` needs and `get_params` throws away.
+_split_parameters: Callable[[str], list[str]]
+_split_parameters = email.message._parseparam  # type: ignore[attr-defined]
+
+
+def _written_name(
+    part: Message, header: str, param: str
+) -> tuple[str | None, str | tuple[str | None, str | None, str] | None]:
+    """The plain form of the parameter and its RFC 2231 form, each as written, or `None`.
+
+    The parameters are split as `Message.get_params` splits them, quotes and all, but the
+    names are kept: once the standard library has joined the RFC 2231 segments, nothing tells a
+    continued value without a charset from a plain one, and the rule needs to know which was
+    written (`[D27]`). The joining itself is the standard library's.
+    """
+    value = part.get(header)
+    if value is None:
+        return None, None
+    plain: str | None = None
+    segments: list[tuple[str, str]] = []
+    for item in _split_parameters(str(value))[1:]:
+        name, _, written = item.partition("=")
+        name, written = name.strip(), written.strip()
+        if name == param:
+            if plain is None:  # A second plain one is ignored, as `get_param` ignores it.
+                plain = unquote(written)
+        elif re.fullmatch(rf"{re.escape(param)}\*(?:[0-9]+\*?)?", name):
+            segments.append((name, written))
+    if not segments:
+        return plain, None
+    joined = decode_params([("", ""), *segments])[1][1]
+    if isinstance(joined, tuple):
+        return plain, (joined[0], joined[1], unquote(joined[2]))
+    return plain, unquote(joined)
+
+
+def _plain_name(written: str) -> tuple[str | None, bool]:
+    """A name written without a charset: its encoded-words decoded, and whether that fell back."""
+    if "=?" not in written:
+        return _edges(written), False
+    decoded, fell_back = _read(_UNSTRUCTURED, written)
+    return _edges(decoded), fell_back
+
+
+def _edges(name: str) -> str | None:
+    """White space at either end is not part of a name; a period there is (`[D27]`)."""
+    return name.strip() or None
 
 
 def _decodes(charset: str | None, text: str) -> bool:

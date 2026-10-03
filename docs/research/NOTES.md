@@ -6,10 +6,11 @@ F1–F10 were probed **2026-09-17**, F17 **2026-09-23**, F18 and F19 **2026-09-3
 library; F11–F12 on **2026-09-23** with [`probes/dependencies.py`](probes/dependencies.py)
 against the versions in `uv.lock`; F20 on **2026-10-01** with
 [`probes/observables.py`](probes/observables.py), which measures the service's own grammars and
-was run inside the published 0.4.0 image and on the tree that became 0.5.0. Each of them is
-printed by one function in its script; re-run the script against a newer interpreter, dependency
-or release to see whether a finding still holds. The scripts are offline and read-only. F13 to
-F16 each say how they were measured.
+was run inside the published 0.4.0 image and on the tree that became 0.5.0; F21 on
+**2026-10-03** with `probes/email_stdlib.py`, on 3.13.12 and on 3.13.15 inside the published
+0.5.0 image. Each of them is printed by one function in its script; re-run the script against a
+newer interpreter, dependency or release to see whether a finding still holds. The scripts are
+offline and read-only. F13 to F16 each say how they were measured.
 
 These notes feed [`../SPEC.md`](../SPEC.md). Where something is a **decision**, the spec
 wins; this file records only **what the standard library, the dependencies and the tools
@@ -55,6 +56,12 @@ number, as F15 was.
   IPv4 one let either of them rule the address out, so an address that ended a sentence was
   never a candidate. Hence `[D26]`: what decides is the character on the far side of the mark.
   (F20)
+- A name's encoded-words were decoded by handing the bare name to the parser of
+  `Content-Disposition`, which rewrote a `;` and what followed it as a parameter on every
+  interpreter, and joined two encoded-words on 3.13.15 only — by a change in `get_phrase` that
+  nothing pinned. `policy.default` is no better a rule: it keeps the white space at a segment
+  boundary and takes whichever of two forms comes first. Hence `[D27]`: the name is read with
+  the grammar of unstructured text, by a rule written as its result. (F21)
 
 ---
 
@@ -145,6 +152,8 @@ Extrapolated to `MAX_MESSAGE_BYTES` (50 MB) of small parts, `policy.default` alo
 Both policies handle RFC 2231 on 3.13. Only `policy.default` decodes RFC 2047 encoded-words
 inside a filename — non-standard, but common enough to matter. **Neither** strips path
 components: traversal defence is the service's job, never the parser's.
+
+What the service reads a name with is neither of these readings: see F21 and `[D27]`.
 
 ## F5 — a lone surrogate is a guaranteed 500, but only on the real JSON path
 
@@ -648,3 +657,55 @@ hyphen or a period in front is taken along as part of that token; re-armed, the 
 reads as anything. The same text without the defanging is returned. This is a different
 mechanism from the one above and `[D26]` does not touch it: it is a known defect, listed in
 `CHANGELOG.md` and stated by `tests/test_known_defects.py`.
+
+## F21 — a filename read by three grammars, and which one moved
+
+Probed with `f21_a_filename_read_by_three_grammars` in `probes/email_stdlib.py` on 3.13.12 and
+on 3.13.15 inside the published 0.5.0 image, and through the service itself over HTTP on both,
+with the same thirty shapes of name.
+
+Until 0.6.0 the service decoded the encoded-words of a name by handing the bare name —
+`get_filename()` under `compat32`, which decodes none — to the header registry as the value of
+`Content-Disposition`. That grammar expects a disposition type first: it fails at the first `=`
+of the first encoded-word, and its recovery path (`_find_mime_parameters`) reads the rest
+through `get_phrase`, the grammar of a display name.
+
+| The bare name | as `Content-Disposition`, 3.13.12 | as `Content-Disposition`, 3.13.15 | as unstructured text, both |
+| --- | --- | --- | --- |
+| two encoded-words, `naïve-no` and `tes.txt` | `naïve-no tes.txt` | `naïve-notes.txt` | `naïve-notes.txt` |
+| two encoded-words split inside the extension | `notes.t xt` | `notes.txt` | `notes.txt` |
+| an encoded-word, then `;v2.pdf` | `résumé; v2.pdf` | `résumé; v2.pdf` | `résumé;v2.pdf` |
+| an encoded-word, then `;x=y.pdf` | `résumé; x="y.pdf"` | `résumé; x="y.pdf"` | `résumé;x=y.pdf` |
+| an encoded-word, then `".pdf` | `résumé".pdf"` | `résumé".pdf"` | `résumé".pdf` |
+| an encoded-word, then ` notes.pdf` | `résumé notes.pdf` | `résumé notes.pdf` | `résumé notes.pdf` |
+
+**What moved is `get_phrase`.** 3.13.15 drops the white space between two encoded-words in a
+phrase and 3.13.12 keeps it. Measured by swapping that one function: with `get_phrase` taken
+from 3.13.12's `email/_header_value_parser.py` and put into 3.13.15's, the service's own
+`filename_of` gave the 3.13.12 result for each shape with two encoded-words, while one
+encoded-word, and an encoded-word followed by plain text, kept theirs — the controls. Which
+patch release between the two made the change was not measured. So every published image up to
+0.5.0, all of them built on 3.13.15, joined two encoded-words in a name by a correction in a
+grammar that is not the name's, and nothing pinned it; and every one of them rewrote a `;` after
+an encoded-word as a parameter, on both interpreters, with `extension` `pdf"` wherever the
+rewriting added a quotation mark at the end (the fourth and fifth rows).
+
+**`policy.default` reads the parameter with its own grammar**, and that is a different rule
+again — the same on both interpreters:
+
+| The parameter | `compat32` `get_filename()` | `policy.default` `get_filename()` |
+| --- | --- | --- |
+| continued, white space at the segment boundary between two encoded-words | the encoded-words, undecoded | `naïve-no tes.txt` |
+| with a charset, its text an encoded-word | `=?utf-8?Q?x?=.pdf` | `=?utf-8?Q?x?=.pdf` |
+| `filename=`, then `filename*=` | `plain.pdf` | `plain.pdf` |
+| `filename*=`, then `filename=` | `plain.pdf` | `résumé.pdf` |
+| `" .notes. "` | `.notes.` | `.notes.` |
+
+`compat32` takes the plain form whichever comes first, and `policy.default` the one written
+first. Both remove white space at the ends of a name and keep its periods. The header as
+`policy.default` renders it — which is what `headers{}` shows `[D24]` — keeps the white space at
+the ends, and shows one parameter where two were written.
+
+The grammar of unstructured text joined two encoded-words and left everything else as written
+for every shape measured, on both interpreters. Hence `[D27]`: the plain form is read with it,
+and the rule is written down as its result rather than as any one of these readings.
