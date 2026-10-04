@@ -328,3 +328,40 @@ def test_the_defanged_form_before_a_period_was_always_returned(client: TestClien
         "192[.]0[.]2[.]1",
         True,
     )
+
+
+@pytest.mark.parametrize(
+    "note",
+    ["relayed by 192.0.2.30.", "relayed by ...192.0.2.30 and on"],
+    ids=["a period after it", "an ellipsis before it"],
+)
+def test_an_occurrence_the_rule_recognises_leads_the_entry_it_joins(
+    client: TestClient, note: str
+) -> None:
+    """`[D26]` where the same address also stands where it was always returned.
+
+    Headers are read first `[D9]`, so the occurrence next to a mark opens the entry: its
+    `value_raw` and `defanged`, its place first in `sources`, and the defanged form in the body
+    joins it as a second occurrence. A mark on either side, because the rule has two. The
+    control is the same message without the address in the header — the entry every release
+    before 0.5.0 returned for both.
+    """
+
+    def entry(note: str) -> tuple[tuple[str, str, bool, int], list[tuple[str, str | None]]]:
+        raw = b.message(
+            {"Subject": "a plain subject", "X-Note": note},
+            body=b"the same host, written as 192[.]0[.]2[.]30 here\r\n",
+        )
+        found = dissect(client, raw)["messages"][0]["observables"]
+        (only,) = [o for o in found if o["type"] == "ip"]
+        fields = (only["value_raw"], only["value"], only["defanged"], only["occurrences"])
+        return fields, [(s["kind"], s["header_name"]) for s in only["sources"]]
+
+    assert entry(note) == (
+        ("192.0.2.30", "192.0.2.30", False, 2),
+        [("header", "x-note"), ("body_text", None)],
+    )
+    assert entry("relayed by a host") == (
+        ("192[.]0[.]2[.]30", "192.0.2.30", True, 1),
+        [("body_text", None)],
+    )
