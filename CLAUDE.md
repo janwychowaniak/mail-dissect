@@ -254,7 +254,10 @@ workflow's `archive` job pulls what was pushed by its digest, saves it, loads it
 empty store and compares the Id (`.github/scripts/archive-image.sh`, F16) before it attaches the
 two files. It is the only job with `contents: write`, and it runs after the push: when it fails,
 re-run that job alone. Re-running the whole workflow builds and pushes again, and can publish
-the same version under another digest — the same reason a tag is never pushed twice.
+the same version under another digest — the same reason a tag is never pushed twice. After it
+attaches them, it compares the release's description, as published, with the tag message, and
+fails when they differ: the checkout leaves only a lightweight copy of the tag, and 0.6.0 was
+first released with its commit message as its notes.
 
 **An "unchanged" line in the notes is a negative result**, and needs what every negative result
 needs: an input on which the change would show if it were there. "`received[]` does not
@@ -310,6 +313,20 @@ The full record is `docs/SPEC.md` §22. The ones most likely to be "improved" by
   no other alternative swallows that token. And letting a hyphen through whatever follows it
   looks like completeness for `a-b` and cuts `192.0.2.1-static.example.net` into an address and
   the tail of a host name.
+- **[D27]** a part's name is read by one rule, written as its result (SPEC §6.4), and every
+  shortcut to it is a parser that does something else (F21). Handing the bare name to the
+  `Content-Disposition` grammar rewrote a `;` and what followed as a parameter, and joined two
+  encoded-words only because Python 3.13.15 happened to. `policy.default` keeps the white space
+  between encoded-words at a continuation boundary and takes whichever form comes first;
+  `get_filename()` takes the plain form whenever one is written, and strips before an
+  encoded-word is decoded, so the space it puts at an end survives. The plain form goes through
+  the unstructured grammar under a header name the registry does not know, and that name is
+  load-bearing too. Decoding the charset form once more, reading the plain form beside a winning
+  RFC 2231 one "to be safe" — which raises `encoding_fallback` for what nothing read — and
+  trimming periods with the white space all look like care, and each changes a name that was
+  written exactly. `extension` comes from the last path component. And `headers{}` stays the
+  parser's view `[D24]`: making it agree with the name is the same regression as restoring a
+  value as written.
 - **[D15]** HTML is parsed with the standard library; do not reach for `lxml` for "robustness".
 - **[D20]**, SPEC §5.1: `encoding_fallback` fires when, and only when, a declared charset was
   not taken or something was substituted. A scrub that loses nothing — raw UTF-8 in an address
