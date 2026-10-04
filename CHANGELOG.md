@@ -24,6 +24,83 @@ its defect.
   `defanged: true`. In every release since 0.1.0, measured on the published images.
   Saved as `2026-10-01-defanged-after-a-hyphen-or-a-period.eml`.
 
+## 0.6.0 — 2026-10-04
+
+`ghcr.io/janwychowaniak/mail-dissect@sha256:bf7b372796dc8c4cbf0a1f7a0bb497e02992d0b3158954d76220ffd0ae23fe62`
+
+Image Id `sha256:a264fcd9d8bd72a720de68acbaf3dae2e1b55b7cbce2fe7a6f134184fb32f87c`, after a pull
+and after `docker load` of the release file alike. Python 3.13.16.
+
+A part's name is now read by one rule, which says what the result is (SPEC §6.4, `[D27]`).
+Until now the specification said nothing about it, and the code gave the bare name to the parser
+of `Content-Disposition`, which rewrote a semicolon and what followed it as a parameter, and
+joined two encoded-words only on some patch releases of Python (F21). The name is `filename`, or
+`name` where `filename` is not written; the RFC 2231 form wins wherever it stands; the plain
+form, once the quoting of its value is undone, loses the white space between two adjacent
+encoded-words and nothing else; the form with a charset is read in that charset and no further,
+and gives way to the plain one, reported as `encoding_fallback`, when that charset is not taken;
+white space at the ends goes, and a period stays.
+
+The `/v1` paths, fields and value sets are unchanged. What moves is `mime_parts[].filename`,
+`attachments[].filename` and `.extension`, `artifacts[].filename`, the name of a served
+artifact, and `flags`, for a part whose name is written in one of the shapes below. Measured on
+the same inputs against 0.5.0 — the saved messages, 3000 generated names and 1000 damaged
+messages, every difference classified:
+
+**Changes:**
+
+- an encoded-word followed by a semicolon: the name as written, `résumé;v2.pdf`; it was
+  `résumé; v2.pdf`, and with an equals sign after the semicolon the rest came back as a quoted
+  parameter, `résumé; x="y.pdf"`, with the extension `pdf"`
+- an encoded-word followed by an escaped quotation mark: `résumé".pdf`; it gained a second
+  quotation mark at the end, with the extension `pdf"`
+- a plain form and an RFC 2231 form of the same name, in either order, in `Content-Disposition`
+  or in `Content-Type`: the RFC 2231 form; it was the plain one
+- an RFC 2231 form whose charset cannot be looked up, or does not decode what it declares,
+  beside a plain one: the plain one, as before, and now with `encoding_fallback`
+- a plain form beside a readable RFC 2231 form, where the plain one held an encoded-word that
+  did not read cleanly: on a part, `encoding_fallback` is no longer raised, because nothing
+  reads the plain form there any more; where the header is the message's own, `headers{}` still
+  reads it and the flag stays, as before
+- a name declared with a charset whose text looks like an encoded-word: that text; it was
+  decoded a second time
+- white space at either end of the name, also when an encoded-word put it there: removed, as it
+  already was when it stood outside one; a space an encoded-word decodes to inside the name stays
+- the extension of a name that begins with a period: none — `.profile` had `profile`; and the
+  extension comes from the last path component, so `dir.d/file` has none, where it had `d/file`
+- `artifacts[].filename` and the served name follow the name, through the same sanitising as
+  before
+
+**Unchanged:**
+
+- two or more adjacent encoded-words in a name, separated by a space, several, a tab, a fold or
+  nothing: joined, as on every image published before this one, all of which run Python
+  3.13.15 — now by a rule that does not depend on the interpreter; on 3.13.12 the old code kept
+  the white space between them
+- a name with no encoded-word, in one form: identical
+- a name in the RFC 2231 form alone: identical, but for the extension of a name that begins
+  with a period or holds a path separator
+- a semicolon, an equals sign, a parenthesis, a comma or a quotation mark with no encoded-word
+  before it, or inside an encoded-word: identical
+- a period at either end of a name: kept in `filename`, as before, and `archive.exe.` still has
+  no extension
+- every part with no name in these shapes, and everything outside the name, its extension, the
+  artifact name and `flags`: identical across the 4040 inputs
+- the image's Python moves from 3.13.15 to 3.13.16, as its base is rebuilt under its tag: the
+  same commit built on both answered the 4040 inputs identically
+
+Also in this release: each release on GitHub carries the published image as
+`mail-dissect-0.6.0.tar.gz`, saved by its full tag, with a `sha256sum` file beside it; the image
+Id to compare after `docker load` is recorded above, beside the digest.
+
+Verified against `apache/tika:3.2.3.0` and `gotenberg/gotenberg:8.37.0`.
+
+The release page on GitHub was first published with the message of the commit the tag points at
+as its description, not with these notes: the release workflow read a lightweight copy of the
+tag. The description was replaced with the tag message the same day; the tag, the image and the
+release files were not touched, and the workflow now fetches the tag itself and checks the
+published description against it.
+
 ## 0.5.0 — 2026-10-01
 
 `ghcr.io/janwychowaniak/mail-dissect@sha256:1b80fe5c240117ea0ac2ded52f7ff43b734bd1f42a39ccb05b0ee0953b49736e`
