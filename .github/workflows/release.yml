@@ -107,6 +107,18 @@ jobs:
           .github/scripts/archive-image.sh "$IMAGE" "$VERSION" "$IMAGE_ID"
           echo "- archive: \`$(cat "mail-dissect-$VERSION.tar.gz.sha256")\`" >> "$GITHUB_STEP_SUMMARY"
 
+      # The checkout stores the commit the tag points at under the tag's name: a lightweight tag,
+      # whose contents are the commit message, and --notes-from-tag reads exactly that. 0.6.0 was
+      # released with its commit message as its notes until the notes were replaced by hand.
+      - name: Fetch the tag as it was pushed
+        run: |
+          git fetch --no-tags --depth=1 --force origin \
+            "+refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          if [ "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME")" != tag ]; then
+            echo "::error::$GITHUB_REF_NAME is not an annotated tag, so it carries no release notes"
+            exit 1
+          fi
+
       - name: Attach the archive to the release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -119,4 +131,19 @@ jobs:
           else
             gh release create "$GITHUB_REF_NAME" "${FILES[@]}" \
               --verify-tag --notes-from-tag --title "$GITHUB_REF_NAME"
+          fi
+
+      # Checked on what was published rather than on what was sent, so a cause nobody has met yet
+      # turns the job red as well. Trailing newlines are not part of the comparison.
+      - name: The release notes are the tag message
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          TAG_NOTES="$(git tag --list "$GITHUB_REF_NAME" --format='%(contents)')"
+          RELEASE_NOTES="$(gh release view "$GITHUB_REF_NAME" --json body --jq .body)"
+          if [ -z "$TAG_NOTES" ] || [ "$TAG_NOTES" != "$RELEASE_NOTES" ]; then
+            echo "::error::the notes of release $GITHUB_REF_NAME are not its tag message"
+            diff <(printf '%s\n' "$TAG_NOTES") <(printf '%s\n' "$RELEASE_NOTES") | head -20 || true
+            exit 1
           fi
