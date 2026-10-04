@@ -101,8 +101,8 @@ docker run --rm -v "$PWD/tests:/tests:ro" mail-dissect:dev python /tests/pins.py
 ```
 
 **The image's Python is not the developer's.** `python:3.13-slim-bookworm` is rebuilt under
-its tag, so the image carries whatever 3.13.x is current (3.13.15 when the suite ran on
-3.13.12), and what `headers{}` and `addresses{}` return is that interpreter's parser at work
+its tag, so the image carries whatever 3.13.x is current (3.13.16 at 0.6.0, while the suite
+ran on 3.13.12), and what `headers{}` and `addresses{}` return is that interpreter's parser at work
 `[D24]`. `tests/pins.py` holds the expectations that depend on it — the header registry's map
 and the values of the saved messages — and needs nothing the image lacks, so the last line
 above runs them on the interpreter that ships. CI runs it in the `container` job and the
@@ -232,7 +232,7 @@ contract — the version tag is.
 **What the version number says.** A patch fixes a defect and leaves the contract as it was
 (0.1.1). A minor release changes behaviour a consumer can see within `/v1` — which inputs raise
 a flag, what a folded header yields, which addresses are candidates — without extending a closed
-set (every release from 0.2.0 to 0.5.0); calling that a patch would misdescribe it. Extending a
+set (every release from 0.2.0 to 0.6.0); calling that a patch would misdescribe it. Extending a
 closed set is `/v2`. `1.0.0` is released when the consumer says so `[D16]`.
 
 **Every release, in this order:** the notes list what changes in behaviour, measured by running
