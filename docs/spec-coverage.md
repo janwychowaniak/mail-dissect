@@ -130,8 +130,8 @@ Any further case gets the next free number and a line saying where it came from.
 | No mutation raises an unhandled exception or exceeds the time limit | §18 | `test_fuzz::test_mutations_do_not_topple_the_service` (fixed seeds, every run) |
 | The long run, with a reported seed | §18 | `test_fuzz::test_the_long_run` (marker `fuzz`, nightly) |
 | Every finding becomes a permanent test | §18 | `test_fuzz::test_saved_findings_stay_fixed` over `tests/regressions/` |
-| A byte above 0x7F in any header, the message's or a part's, is dissected, never a 500 | §18 | `test_fuzz::test_a_non_ascii_byte_in_any_header_is_dissected`, mutator `non_ascii_header_bytes` |
-| A folded header line, the message's or a part's, is part of what the fuzzer sends | §18 | mutator `fold_header_lines` |
+| A byte above 0x7F in any header, the message's or a part's, is dissected, never a 500 | §18 | `test_fuzz::test_a_non_ascii_byte_in_any_header_is_dissected`, mutator `non_ascii_header_bytes` (`…_the_non_ascii_mutator_reaches_header_values`) |
+| A folded header line, the message's or a part's, is part of what the fuzzer sends | §18 | mutator `fold_header_lines` (`test_fuzz::test_the_fold_mutator_folds`) |
 | What is read out of a header holds on the interpreter the image ships: the registry's map, the values of the saved folded messages, the verdicts on the saved quoted addresses, and the names of the saved parts | §7, §6.4, `[D24]`, `[D25]`, `[D27]` | `tests/pins.py`, run by `test_folding`, `test_quoted_address` and `test_filename`, and inside the image by the CI `container` job |
 | `received[]`, `auth[]` and `encoding_fallback` do not depend on where a header was folded | §7, §5.1 | `test_folding::test_received_is_decomposed_the_same_folded_or_not`, `…_authentication_results_are_decomposed_the_same_folded_or_not`, `…_a_folded_address_header_reports_what_its_unfolded_twin_reports` |
 | The extractor gets the declared type only when a request header can carry it | §14.1 | `test_tools::test_the_extractor_gets_a_type_a_header_can_carry` |

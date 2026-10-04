@@ -202,6 +202,36 @@ def test_the_fold_mutator_folds(seed: int) -> None:
         assert re.sub(rb"\r?\n([ \t])", rb"\1", folded) == original
 
 
+@pytest.mark.parametrize("seed", DEFAULT_SEEDS)
+def test_the_non_ascii_mutator_reaches_header_values(seed: int) -> None:
+    """F17: the bytes land in header values, the message's and a part's, and nowhere else.
+
+    Every message of the corpus comes back changed, and only in lines that are header lines:
+    the name and the colon as they were, and nothing added but bytes above 0x7F, so the
+    fuzzer sends the shape the mutator is named for. Over the corpus, a header below the
+    message's own block — a part's or a nested message's — is hit as well as the message's,
+    which is what the mutator's docstring promises.
+    """
+    rng = random.Random(seed)
+    places: set[str] = set()
+    for original in _corpus():
+        damaged = mutate.non_ascii_header_bytes(original, rng)
+        assert damaged != original
+        before, after = original.split(b"\r\n"), damaged.split(b"\r\n")
+        assert len(after) == len(before)
+        end_of_top_block = before.index(b"")
+        for index, (was, now) in enumerate(zip(before, after, strict=True)):
+            if was == now:
+                continue
+            assert mutate._HEADER_LINE.match(was)
+            name = was[: was.index(b":") + 1]
+            assert now.startswith(name)
+            assert bytes(c for c in now if c < 0x80) == bytes(c for c in was if c < 0x80)
+            assert sum(c >= 0x80 for c in now) > sum(c >= 0x80 for c in was)
+            places.add("message" if index < end_of_top_block else "part")
+    assert places == {"message", "part"}
+
+
 def test_a_message_that_is_not_one_is_refused(client: TestClient) -> None:
     """The boundary the fuzzer leans on: below it, refusal; above it, flags."""
     response = client.post(
