@@ -544,9 +544,15 @@ and a registry alone could not tell an address from a sentence.
   addresses are everyday content and a consumer should not lose them.
 - **`domain`** — labels per RFC 1035 ending in a **public suffix from the registry**; also
   derived from a URL's host **and from an email address's domain** (decompose, do not select —
-  asymmetry between those two sources would be accidental).
+  asymmetry between those two sources would be accidental). A host gives a `domain` only when
+  it is labels — letters and digits in any script, `_` and `-`, separated by periods — and a
+  URL whose host is anything else is returned without one `[D30]`. A percent-encoded host is
+  not labels as written, and nothing is decoded.
 - **`ip`** — IPv4 and IPv6 grammar, with no filtering of private or reserved addresses.
-- **`email`** — `addr-spec` per RFC 5322.
+- **`email`** — `addr-spec` per RFC 5322. The address of a `mailto:` URL is a list of
+  recipients separated by commas (RFC 6068), and each recipient that is one address — a local
+  part by the address grammar and a domain of labels — is an `email`; one that is not gives
+  nothing, and nothing is derived from it `[D30]`.
 - **`hash`** — a hexadecimal string of length 32, 40, 64 or 128.
 - **`filename`** — a filename pattern with a **known extension from the registry**. Attachment
   filenames are **not** candidates from content: they are a fact in `attachments[]` and do not
@@ -1222,6 +1228,22 @@ Approved by the maintainer, 2026-09-17.
   `[D13]`: the search starts only where a run starts. A search that may start inside a run
   counts to the run's end again from every position in it, and a message can be built so
   that this takes seconds for every run.
+- **[D30] A value derived from another candidate is checked against its type** (§11.2). A
+  `domain` comes from a host only when the host is labels, and a `mailto:` address gives one
+  `email` for each of its recipients that is one address. Decided 2026-10-05, for 0.7.0. Until
+  then a URL's host became a `domain` whenever it ended in a public suffix, so
+  `http://a.example.net;b.example.org/x` gave the `domain` `a.example.net;b.example.org`, and
+  the same with `& ! $ * + = ( ~ %` and a comma, on the text path and in an attribute alike;
+  and `mailto:a@example.net,b@example.org` gave one `email` holding both. Neither is of the
+  type it is listed as, and a consumer that looks a `domain` up, or writes to an `email`, gets
+  a value no lookup and no mail server accepts. The check is made where the value is derived,
+  not in the grammar, because an address in an attribute is read without the grammar. On the
+  URLs of `probes/grammar.py` — 90 written in prose and 12 in attributes, with these
+  characters in every part of a URL — 21 had a value that was not of its type, and those 21
+  are the only ones that change; afterwards none has one. **Left as they are:** a
+  percent-encoded host gives no `domain`, since decoding it would be a parser in front of the
+  parser; a host that is a public suffix and nothing more, one label, is still a `domain`, as
+  it was; and a period at the end of a recipient's domain is read as in a host, which loses it.
 
 **Implementation**
 

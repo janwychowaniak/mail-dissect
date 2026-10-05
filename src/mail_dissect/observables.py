@@ -119,6 +119,12 @@ MAX_RUN_LENGTH = 262_144
 _LONG_RUN = re.compile(rf"(?<!\S)\S{{{MAX_RUN_LENGTH + 1},}}")
 
 _TRAILING_PUNCTUATION = ".,;:!?\"'"
+# [D30]: a value derived from another candidate is checked against its type. A `domain` is
+# labels, letters and digits in any script, `_` (F12) and `-`, separated by periods; an
+# `email` is a local part by the address grammar and a domain of labels. One label is labels
+# too: a host that is a public suffix and nothing more was a `domain` before, and stays one.
+_DOMAIN_SHAPE = re.compile(r"[\w-]+(?:\.[\w-]+)*")
+_LOCAL_SHAPE = re.compile(_LOCAL_PART)
 _CLOSERS = {")": "(", "]": "[", "}": "{"}
 _HASH_SUBTYPES: dict[int, ObservableSubtype] = {
     32: "md5",
@@ -295,13 +301,23 @@ class Collector:
         if parts.host:
             self._emit_host(parts.host, raw, source, defanged=defanged)
         elif parts.scheme == "mailto" and parts.path and "@" in parts.path:
-            self._emit_email(parts.path, raw, source, defanged=defanged)
+            # RFC 6068: the address part is a list of recipients separated by commas, and each
+            # is taken only when it is one address. A period at the end of its domain is read
+            # as it is in a host, which loses it.
+            for recipient in parts.path.split(","):
+                local, at, domain = recipient.rpartition("@")
+                if (
+                    at
+                    and _LOCAL_SHAPE.fullmatch(local)
+                    and _DOMAIN_SHAPE.fullmatch(domain.rstrip("."))
+                ):
+                    self._emit_email(recipient, raw, source, defanged=defanged)
 
     def _emit_host(self, host: str, raw: str, source: Source, *, defanged: bool) -> None:
         address = _valid_ip(host)
         if address is not None:
             self._emit(address[0], raw, "ip", source, subtype=address[1], defanged=defanged)
-        elif self._registries.public_suffix(host) is not None:
+        elif _DOMAIN_SHAPE.fullmatch(host) and self._registries.public_suffix(host) is not None:
             self._emit(host, raw, "domain", source, defanged=defanged)
 
     def _emit(

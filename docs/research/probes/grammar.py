@@ -131,6 +131,117 @@ SHAPES = [
     "http://example.net/x))))",
 ]
 
+# URLs written in prose, with the characters the URL rules decide about in each part of a URL:
+# the authority, the path, query and fragment, a URL with no authority, one with no scheme, and
+# markup glued to a host.
+URL_GRID = [
+    "see https://example.net/x now",
+    "see https://en.example.org/wiki/Foo_(bar) now",
+    "(see https://example.net/x) now",
+    "see https://example.net/x) now",
+    "[see https://example.net/x] now",
+    "see https://example.net/?ids=1,2,3 now",
+    "see https://example.net/a,b/c now",
+    "see https://example.net/x, and more",
+    "see https://example.net/x), and more",
+    "see http://example.net[1] now",
+    "see https://example.net/path[2]. now",
+    "see http://[2001:db8::1]/x now",
+    "see http://[2001:db8::1]:8080/x now",
+    "see https://a.example.net/x,https://b.example.net/y now",
+    "see www.example.net/a,b now",
+    "see example.net/a(b) now",
+    "see mailto:a@example.net, now",
+    "see https://example.net/a(b now",
+    "see https://example.net/x]. now",
+    "see http://example.net/a[b]c now",
+    "see hxxp://example[.]net/a,b now",
+    "see https://a.example.net/x,b now",
+    "see https://a.example.net/x,mailto:u@example.net now",
+    "see https://a.example.net/x, https://b.example.net/y now",
+    "List-Unsubscribe-like <https://a.example.net/u>,<mailto:u@example.net>",
+    "see https://example.net/?q=a,b:c now",
+    "see mailto:a@example.net now",
+    "see mailto:a@example.net,b@example.net now",
+    "see mailto:a@example.net,b@example.net?subject=x now",
+    "see mailto:a@example.net?cc=b@example.net,c@example.net now",
+    "see mailto:a@example.net, b@example.net now",
+    "see <mailto:a@example.net>,<mailto:b@example.net> now",
+    "see mailto:a@example.net,mailto:b@example.net now",
+    "see sip:a@example.net,b@example.org now",
+    "see http://a.example.net,b.example.org/x now",
+    "see https://a.example.net/x,b@c.example.org now",
+    "see https://a.example.net:8443,x now",
+    "see http://a.example.net/(x).) now",
+    "see (http://a.example.net/x.) now",
+    "see (did you see http://a.example.net/x?) now",
+    "see http://a.example.net/x.}, now",
+    "see http://a.example.net/x now",
+    "see http://a.example.net;b.example.org/x now",
+    "see http://a.example.net&b.example.org/x now",
+    "see http://a.example.net!b.example.org/x now",
+    "see http://a.example.net$b.example.org/x now",
+    "see http://a.example.net*b.example.org/x now",
+    "see http://a.example.net+b.example.org/x now",
+    "see http://a.example.net=b.example.org/x now",
+    "see http://a.example.net(b.example.org/x now",
+    "see http://a.example.net)b.example.org/x now",
+    "see http://a.example.net~b.example.org/x now",
+    "see http://a.example.net%b.example.org/x now",
+    "see http://a.example.net:80;x now",
+    "see http://a.example.net:80,x now",
+    "see www.a.example.net,b.example.org now",
+    "see www.a.example.net;b.example.org now",
+    "see www.a.example.net:80,x now",
+    "see a.example.net/x,b.example.org now",
+    "see http://u,v@a.example.net/x now",
+    "see (http://a.example.net),and now",
+    "see data:text/plain;base64,SGVsbG8= now",
+    "see https://a.example.net/x,y now",
+    "see **http://a.example.net** now",
+    "see **http://a.example.net/x** now",
+    "see *http://a.example.net* now",
+    "see ~~http://a.example.net~~ now",
+    "see `http://a.example.net` now",
+    "see **www.a.example.net** now",
+    "see http://a.example.net&b now",
+    "see |http://a.example.net| now",
+    "see mailto:a@example.net[1] now",
+    "see http://a.example.net. now",
+    "see http://a.example.net./x now",
+    "see http://localhost:8080/x now",
+    "see http://bücher.example/x,y now",
+    "see http://xn--bcher-kva.example/x now",
+    "see http://user:pa;ss@a.example.net/x now",
+    "see http://a_b.example.net/x now",
+    "see https://exa%6Dple.net/x now",
+    "see http://%77ww.example.net/ now",
+    "see http://a.example.net?x=1,2 now",
+    "see http://a.example.net#f,g now",
+    "see www.a.example.net/x(y) now",
+    "see a.example.net/x(y), now",
+    "see http://a.example.net:/x now",
+    "see http://[2001:db8::1] now",
+    "see http://[2001:db8::1]:8080/x,y now",
+    "see ftp://a.example.net/x;type=a now",
+    "see https://a.example.net/x?y=(1) now",
+]
+# Addresses as an attribute gives them, read without the grammar.
+HREFS = [
+    "mailto:a@example.net",
+    "mailto:a@example.net,b@example.net",
+    "mailto:a@example.net?cc=b@example.net",
+    "http://a.example.net;b.example.org/x",
+    "http://a.example.net,b.example.org/x",
+    "http://a.example.net/x",
+    "mailto:Jan%20K%20%3Cjan@example.net%3E",
+    "mailto:a@bücher.example",
+    "mailto:a@example.net,mailto:b@example.net",
+    "http://[2001:db8::1]/x",
+    "https://exa%6Dple.net/",
+    "mailto:a@example.net,,b@example.org",
+]
+
 # A short prefix that opens a grammar's structure, then a long run that never completes it.
 PREFIXES = ["", "http://", "a@", "www.", "x:", "mailto:", "user+", "a.b..", "::1.", "hxxp://"]
 RUN_UNITS = ["a", "a-", "-a", "a.", "a/", "a:", "a=", "a+", "1.", "a[.]", "}", ".", ")", ","]
@@ -147,6 +258,7 @@ def layer1_strings(seed: int = 22) -> list[str]:
         run = (unit * (60 // len(unit) + 1))[:60]
         strings += [run, f"x {run} y", f"{unit} example.net {unit}"]
     strings += SHAPES
+    strings += URL_GRID
     strings += [prefix + (unit * 1000)[:1000] for prefix in PREFIXES for unit in RUN_UNITS]
     words = ["word", "a", "=?a", "x.example.net", "a.b", "u@example.org", "192.0.2.7", "a-b"]
     for word, white in itertools.product(words, WHITE):
@@ -329,7 +441,21 @@ def _task_paths(sizes: dict[str, list[int]]) -> dict[str, list[list[float]]]:
     return out
 
 
+def _task_hrefs(hrefs: list[str]) -> list[list[Any]]:
+    from mail_dissect.observables import Collector, Source
+    from mail_dissect.registries import Registries
+
+    registries = Registries.load()
+    out = []
+    for href in hrefs:
+        collector = Collector(registries)
+        collector.feed_url(href, Source(kind="body_html", part_index=0))
+        out.append([[c.value, c.type, c.subtype] for c in collector.finish()])
+    return out
+
+
 TASKS = {"scan": _task_scan, "responses": _task_responses, "sweep": _task_sweep}
+TASKS["hrefs"] = _task_hrefs
 TASKS["paths"] = _task_paths
 
 
@@ -389,6 +515,8 @@ def layer1(old: str, new: str) -> None:
         old_out = _run(old_src, "scan", strings, work)
         new_out = _run(new_src, "scan", strings, work)
         control_out = _run(new_src, "scan", control, work)
+        old_hrefs = _run(old_src, "hrefs", HREFS, work)
+        new_hrefs = _run(new_src, "hrefs", HREFS, work)
     labels = [repr(s[:80]) for s in strings]
     differ = _compare(labels, old_out, new_out)
     print(f"layer 1, {old} against {new}: {len(strings)} strings compared, {len(differ)} differ")
@@ -397,6 +525,11 @@ def layer1(old: str, new: str) -> None:
         print(f"  {text[:80]!r}\n    old {a}\n    new {b}")
     control_differ = _compare(labels, new_out, control_out)
     print(f"  control, one string changed: {len(control_differ)} differ ({control_differ})")
+    differ_hrefs = _compare(HREFS, old_hrefs, new_hrefs)
+    print(f"  hrefs, read without the grammar: {len(HREFS)} compared, {len(differ_hrefs)} differ")
+    for href, a, b in zip(HREFS, old_hrefs, new_hrefs, strict=True):
+        if a != b:
+            print(f"  {href!r}\n    old {a}\n    new {b}")
 
 
 def _record_suite() -> dict[str, bytes]:
@@ -466,6 +599,23 @@ def layer2(old: str, new: str) -> None:
         found = sum(len(message["observables"]) for message in body["messages"])
         return f"flags {body['flags']}, {len(body['messages'])} messages, {found} candidates"
 
+    def moved(before: list[Any], after: list[Any]) -> tuple[list[Any], list[Any]]:
+        def pairs(result: list[Any]) -> list[tuple[str, str]]:
+            if result[0] != 200:
+                return []
+            return [
+                (item["type"], item["value"])
+                for message in result[1]["messages"]
+                for item in message["observables"]
+            ]
+
+        old_pairs, new_pairs = pairs(before), pairs(after)
+        return (
+            [pair for pair in old_pairs if pair not in new_pairs],
+            [pair for pair in new_pairs if pair not in old_pairs],
+        )
+
+    limit = os.environ.get("GRAMMAR_PROBE_ALL") is None
     for label, first, second in (
         (f"{old} against {new}", old_out, new_out),
         (f"control, {changed} changed, against {new}", new_out, control_out),
@@ -478,11 +628,14 @@ def layer2(old: str, new: str) -> None:
         ]
         total = sum(len(results) for results in first.values())
         print(f"layer 2, {label}: {total} responses compared, {len(differ)} differ")
-        for mode, name in differ[:20]:
+        for mode, name in differ[: 20 if limit else len(differ)]:
             size = len(messages[name])
             print(f"  {mode}: {name} ({size} bytes)")
             print(f"    before: {summary(first[mode][name])}")
             print(f"    after:  {summary(second[mode][name])}")
+            gone, came = moved(first[mode][name], second[mode][name])
+            if gone or came:
+                print(f"    gone: {gone}\n    came: {came}")
     saved = len(list((ROOT / "tests" / "regressions").glob("*.eml")))
     print(f"  ({len(messages)} messages: the suite's, {saved} saved, the golden samples)")
 
