@@ -263,11 +263,19 @@ class AuthResult:
 # Candidates only: hostnames are full of hex letters, so `mail.example.com` yields
 # "e.c" to any shape-based pattern. Every candidate is validated as a real address.
 _IP_CANDIDATE = re.compile(r"[0-9a-fA-F:.]{3,45}")
-_RECEIVED_TOKEN = re.compile(
-    r"\b(from|by|with|id|for|via)\s+([^\s;]+(?:\s*\([^)]*\))?)", re.IGNORECASE
-)
+# A `Received` field is `keyword value`, and the value may carry a comment in parentheses:
+# the pattern `\b(from|by|with|id|for|via)\s+([^\s;]+(?:\s*\([^)]*\))?)`. Its comment branch
+# reads to the next `)`, and with none left in the field it read to the end before giving up,
+# at every keyword: quadratic in a field of `from a (`. So the comment is tried only where a
+# `)` still follows, which is exactly where it can match.
+_RECEIVED_TOKEN = re.compile(r"\b(from|by|with|id|for|via)\s+([^\s;]+)", re.IGNORECASE)
+_RECEIVED_COMMENT = re.compile(r"\s*\([^)]*\)")
 _AUTH_METHOD = re.compile(r"^\s*([A-Za-z0-9_.-]+)\s*=\s*([A-Za-z0-9_-]+)")
-_AUTH_PARAM = re.compile(r"([A-Za-z0-9_.-]+)\s*=\s*(\"[^\"]*\"|[^\s;]+)")
+# The lookbehind lets a name start only where a run of name characters starts. A later start in
+# the same run ends where the run ends, before the same character, so it fails exactly as the
+# first did: the lookbehind loses no match, and stops a run without `=` after it from being
+# read again from each of its characters.
+_AUTH_PARAM = re.compile(r"(?<![A-Za-z0-9_.-])([A-Za-z0-9_.-]+)\s*=\s*(\"[^\"]*\"|[^\s;]+)")
 
 
 def addresses_of(raw: bytes) -> dict[str, list[Address]]:
@@ -333,10 +341,16 @@ def parse_received(value: str) -> Hop:
     if not body:
         body, timestamp = value, ""
     fields: dict[str, str] = {}
-    for match in _RECEIVED_TOKEN.finditer(body):
+    last_close = body.rfind(")")
+    position = 0
+    while (match := _RECEIVED_TOKEN.search(body, position)) is not None:
+        end = match.end()
+        if end <= last_close and (comment := _RECEIVED_COMMENT.match(body, end)) is not None:
+            end = comment.end()
         key = match.group(1).lower()
         if key not in fields:
-            fields[key] = match.group(2).strip()
+            fields[key] = body[match.start(2) : end].strip()
+        position = end
     from_value = fields.get("from")
     from_host, from_ip = _split_host_and_ip(from_value)
     return Hop(

@@ -101,9 +101,25 @@ def deep_nesting(raw: bytes, _: random.Random) -> bytes:
     return wrapped
 
 
+# The symbols of the sweep in `docs/research/probes/grammar.py`. A unit of one word character
+# and one mark, repeated, puts a word boundary at every character, and every boundary is a place
+# an address or a URL may start. The long line was `a` repeated until 0.7.0, with no boundary
+# inside it: a candidate could start only where the line did, and the fuzzer passed against a
+# grammar that was quadratic on most other units (F22). Two symbols cannot spell a marker of
+# the defanged path.
+SWEEP_SYMBOLS = [*"a1.-/:@_+=?#%&~!*'\"()[]{}<>,;$^`|", chr(0xE9)]
+_WORD_SYMBOLS = [symbol for symbol in SWEEP_SYMBOLS if re.match(r"\w", symbol)]
+_MARKS = [symbol for symbol in SWEEP_SYMBOLS if not re.match(r"\w", symbol)]
+
+
 def very_long_line(raw: bytes, rng: random.Random) -> bytes:
     head, separator, body = raw.partition(b"\r\n\r\n")
-    return head + b"\r\nX-Long: " + b"a" * rng.randrange(1000, 50_000) + separator + body
+    pair = [rng.choice(_WORD_SYMBOLS), rng.choice(_MARKS)]
+    rng.shuffle(pair)
+    unit = "".join(pair)
+    length = rng.randrange(1000, 50_000)
+    line = (unit * (length // len(unit) + 1))[:length].encode()
+    return head + b"\r\nX-Long: " + line + separator + body
 
 
 def control_bytes(raw: bytes, rng: random.Random) -> bytes:

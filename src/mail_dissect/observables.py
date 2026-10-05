@@ -146,6 +146,9 @@ class Candidate:
     ambiguous: bool = False
     occurrences: int = 0
     sources: list[Source] = field(default_factory=list)
+    # The same places as a set, so that asking whether one is listed costs the same for the
+    # first source as for the twenty-thousandth.
+    places: set[Source] = field(default_factory=set, repr=False, compare=False)
 
 
 class Collector:
@@ -328,7 +331,8 @@ class Collector:
             self._order.append(candidate)
         candidate.occurrences += 1
         # [D14]: `sources` lists distinct PLACES; five hits in one body is one source.
-        if source not in candidate.sources:
+        if source not in candidate.places:
+            candidate.places.add(source)
             candidate.sources.append(source)
 
 
@@ -545,18 +549,25 @@ def _expand(text: str, start: int, end: int) -> tuple[int, int]:
 
 
 def _trim(raw: str) -> str:
-    """Strip trailing punctuation a sentence leaves behind, parenthesis-balance aware."""
-    value = raw
-    while value:
-        last = value[-1]
+    """Strip trailing punctuation a sentence leaves behind, parenthesis-balance aware.
+
+    A character comes off the end while it is punctuation, or a closer with fewer openers
+    than closers before it. One pass from the end with the counts kept as it goes, and one
+    slice: cutting a character at a time and counting again was quadratic in a long tail.
+    """
+    closers = {closer: raw.count(closer) for closer in _CLOSERS}
+    openers = {closer: raw.count(opener) for closer, opener in _CLOSERS.items()}
+    end = len(raw)
+    while end:
+        last = raw[end - 1]
         if last in _TRAILING_PUNCTUATION:
-            value = value[:-1]
-            continue
-        if last in _CLOSERS and value.count(_CLOSERS[last]) < value.count(last):
-            value = value[:-1]
-            continue
-        break
-    return value
+            end -= 1
+        elif last in _CLOSERS and openers[last] < closers[last]:
+            closers[last] -= 1
+            end -= 1
+        else:
+            break
+    return raw[:end]
 
 
 def _rearm(raw: str) -> str:

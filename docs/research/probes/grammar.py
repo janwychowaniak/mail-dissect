@@ -7,6 +7,7 @@ Run, from the repository root:
     uv run python docs/research/probes/grammar.py sweep [<rev>]
     uv run python docs/research/probes/grammar.py defang [<rev>]
     uv run python docs/research/probes/grammar.py shapes [<rev>]
+    uv run python docs/research/probes/grammar.py paths [<rev>]
 
 F22 in ../NOTES.md is produced here. A revision is anything `git archive` takes; `.`, the
 default for <new> and <rev>, is the working tree. Each tree is imported in a process of its
@@ -29,7 +30,12 @@ never quietly be a tree against itself.
   doubling, best of two, and a ratio above 3 is measured again, best of five, before it is
   reported.
 - `defang`: the defanged forms of the known defect and of the paths it shares, as read.
-- `shapes`: the cost of named inputs that the sweep's units do not build, at three sizes.
+- `shapes`: the cost of named inputs that the sweep's units do not build, at three sizes:
+  real base64, a URL followed by a long tail of each character trimming takes off, and two
+  kinds of ordinary text as the control.
+- `paths`: the cost of the readers outside the grammar that a run made quadratic: the address
+  in CSS `url(`, a `Received` field, `Authentication-Results` parameters, and one value listed
+  in many places.
 
 Each of `layer1` and `layer2` prints a positive control: the same comparison with one input
 changed, which must show as exactly that input.
@@ -293,7 +299,38 @@ def _task_sweep(payload: dict[str, Any]) -> list[list[Any]]:
     return out
 
 
+def _task_paths(sizes: dict[str, list[int]]) -> dict[str, list[list[float]]]:
+    from mail_dissect.headers import parse_auth_results, parse_received
+    from mail_dissect.htmlscan import scan_html
+    from mail_dissect.observables import Collector, Source
+    from mail_dissect.registries import Registries
+
+    registries = Registries.load()
+
+    def places(count: int) -> None:
+        collector = Collector(registries)
+        for index in range(count):
+            collector.feed_text("host.example.net", Source("header", "x-a", index))
+
+    readers = {
+        "CSS url( repeated, characters": lambda n: scan_html(f"<style>{'url(' * (n // 4)}</style>"),
+        "Received of 'from a (', characters": lambda n: parse_received("from a (" * (n // 8)),
+        "auth parameter run, characters": lambda n: parse_auth_results("x; spf=pass " + "a" * n),
+        "one value in many places, places": places,
+    }
+    out: dict[str, list[list[float]]] = {}
+    for name, read in readers.items():
+        rows = []
+        for size in sizes[name]:
+            started = time.perf_counter()
+            read(size)
+            rows.append([size, time.perf_counter() - started])
+        out[name] = rows
+    return out
+
+
 TASKS = {"scan": _task_scan, "responses": _task_responses, "sweep": _task_sweep}
+TASKS["paths"] = _task_paths
 
 
 def _worker(src: str, task: str, request: str, response: str) -> None:
@@ -507,11 +544,12 @@ def _shapes() -> dict[str, str]:
     noise = random.Random(19).randbytes(150_000)
     prose = "Dear customer, your order has shipped and will arrive on Tuesday. Regards, the team. "
     links = "See https://shop.example.com/orders/12345?ref=mail or write to help@example.net now. "
-    return {
-        "real base64, one line": base64.b64encode(noise).decode(),
-        "prose (control)": prose * 2_400,
-        "prose with links (control)": links * 2_400,
-    }
+    named = {"real base64, one line": base64.b64encode(noise).decode()}
+    for character in ".,;:!?\"')]}":
+        named[f"URL + tail of {character}"] = "http://a.example.net/x" + character * 200_000
+    named["prose (control)"] = prose * 2_400
+    named["prose with links (control)"] = links * 2_400
+    return named
 
 
 def shapes(rev: str) -> None:
@@ -525,6 +563,24 @@ def shapes(rev: str) -> None:
     for name, (_, sizes) in zip(named, rows, strict=True):
         cells = "  ".join(f"{size // 1000}k {seconds:.2f}s" for size, seconds in sizes)
         print(f"  {name:24} {cells}")
+
+
+PATH_SIZES = {
+    "CSS url( repeated, characters": [4_000, 8_000, 16_000],
+    "Received of 'from a (', characters": [32_000, 64_000, 128_000],
+    "auth parameter run, characters": [8_000, 16_000, 32_000],
+    "one value in many places, places": [5_000, 10_000, 20_000],
+}
+
+
+def paths(rev: str) -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp)
+        out = _run(_tree(rev, work), "paths", PATH_SIZES, work)
+    print(f"readers outside the grammar in {rev}, one try each:")
+    for name, rows in out.items():
+        cells = "  ".join(f"{size // 1000}k {seconds:.2f}s" for size, seconds in rows)
+        print(f"  {name:36} {cells}")
 
 
 def main() -> int:
@@ -542,6 +598,8 @@ def main() -> int:
         defang(revisions[0] if revisions else ".")
     elif command == "shapes":
         shapes(revisions[0] if revisions else ".")
+    elif command == "paths":
+        paths(revisions[0] if revisions else ".")
     else:
         raise SystemExit(__doc__)
     return 0

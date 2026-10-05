@@ -825,6 +825,31 @@ change and against `v0.6.0`; the same comparison with a period admitted as the s
 local part shows 41, and with no scheme starting after a period 132. `layer2` gives 0 of
 1,208 responses, leaving out what the cost tests send, which the old tree takes minutes over.
 
+**The readers a run made quadratic outside the scan's search.** `shapes` and `paths`, on
+`v0.6.0` and after the change, the largest size of each:
+
+| Reader | Input | 0.6.0 | 0.7.0 |
+| --- | --- | --- | --- |
+| trimming a URL's tail | 192k of `}` after the URL | 52.55 s | 0.05 s |
+| trimming a URL's tail | 192k of `.`, `;`, `:`, `!` or `?` | 1.07–1.10 s | 0.03 s |
+| the address in CSS `url(` | 16k characters of `url(` | 1.32 s | 0.01 s |
+| a `Received` field | 128k characters of `from a (` | 2.46 s | 0.01 s |
+| `Authentication-Results` parameters | a run of 32k `a` after `spf=pass` | 16.88 s | 0.00 s |
+| listing a value's places | one value in 20,000 places | 42.49 s | 0.46 s |
+
+Each grew by about four for twice the input on 0.6.0. A tail of `,`, `)`, `]`, `"` or `'` was
+cheap already, because each of those ends a URL: the tail was never part of it. Trimming took
+a character off at a time and copied the rest, counting brackets again for a closer; it now
+finds the cut in one pass and slices once. The other three readers had a branch that read to
+the end of a run and failed there, from every start in the run; each now reads a run once. A
+value's places were a list searched before each was added; a set beside the list answers
+now. `test_exact_rewrites` compares each rewritten reader with the pattern or loop it
+replaced, kept in the test as its definition. `layer1` gives 0 of 38,318 against the tree
+before, `layer2` 0 of 1,212. The control, ordinary text at 192k characters, read 0.07 s for
+prose against 0.11 s on 0.6.0 and 0.18 s for prose dense with links against 0.13 s; the same
+inputs read 0.09 against 0.14 and 0.23 against 0.19 in the run of the previous change, so the
+direction holds and the size moves by a third between runs.
+
 ---
 
 ## F23 — `html.parser` fed in pieces: where an empty comment ends depends on what has arrived

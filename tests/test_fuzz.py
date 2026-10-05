@@ -202,6 +202,22 @@ def test_the_fold_mutator_folds(seed: int) -> None:
         assert re.sub(rb"\r?\n([ \t])", rb"\1", folded) == original
 
 
+def test_the_long_line_has_word_boundaries_in_it() -> None:
+    """F22: a long line with no word boundary inside it gives a candidate one place to start.
+
+    Every line has a boundary at every character, which is what makes a quadratic grammar
+    slow; the old line, `a` repeated, had none.
+    """
+    rng = random.Random(22)
+    boundaries = []
+    for _ in range(300):
+        damaged = mutate.very_long_line(b"Subject: s\r\n\r\nbody", rng)
+        line = damaged.split(b"X-Long: ", 1)[1].split(b"\r\n", 1)[0].decode()
+        assert 1000 <= len(line) < 50_000
+        boundaries.append(len(re.findall(r"\b", line)) / len(line))
+    assert min(boundaries) > 0.9
+
+
 @pytest.mark.parametrize("seed", DEFAULT_SEEDS)
 def test_the_non_ascii_mutator_reaches_header_values(seed: int) -> None:
     """F17: the bytes land in header values, the message's and a part's, and nowhere else.

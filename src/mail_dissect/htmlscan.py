@@ -13,7 +13,7 @@ and the HTML half of the observables scan are all consumers of it. That is what 
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 
@@ -85,7 +85,12 @@ _RESOURCE_ATTRS: dict[str, tuple[ResourceElement, tuple[str, ...]]] = {
     "th": ("other", ("background",)),
 }
 _SRCSET_ELEMENTS = frozenset({"img", "source"})
-_CSS_URL = re.compile(r"""url\(\s*(?:"([^"]*)"|'([^']*)'|([^)\s]*))\s*\)""", re.IGNORECASE)
+# `url(...)` is read as the pattern `url\(\s*(?:"([^"]*)"|'([^']*)'|([^)\s]*))\s*\)` reads it,
+# case-insensitively, but not by that pattern: its unquoted branch runs to the end of the run at
+# every `url(`, and fails there when nothing closes it, which is quadratic in a run of them.
+_CSS_URL_OPEN = re.compile(r"url\(", re.IGNORECASE)
+_CSS_UNQUOTED_STOP = re.compile(r"[)\s]")
+_NOT_SPACE = re.compile(r"\S")
 _CSS_IMPORT = re.compile(r"""@import\s+(?:"([^"]*)"|'([^']*)')""", re.IGNORECASE)
 _SPACE_RUN = re.compile(r"[ \t\f\v]+")
 _SPACE_AROUND_NEWLINE = re.compile(r" *\n *")
@@ -249,14 +254,63 @@ class _Scanner(HTMLParser):
             self._emit_css(values["style"])
 
     def _emit_css(self, css: str) -> None:
-        for match in _CSS_URL.finditer(css):
-            href = (match.group(1) or match.group(2) or match.group(3) or "").strip()
+        for value in _css_urls(css):
+            href = value.strip()
             if href:
                 self.scan.events.append(ResourceEvent(href=href, element="style"))
         for match in _CSS_IMPORT.finditer(css):
             href = (match.group(1) or match.group(2) or "").strip()
             if href:
                 self.scan.events.append(ResourceEvent(href=href, element="style"))
+
+
+class _Stop:
+    """The first position at or after `i` that `pattern` matches, or the end of the text."""
+
+    __slots__ = ("_at", "_from", "_pattern", "_text")
+
+    def __init__(self, text: str, pattern: re.Pattern[str]) -> None:
+        self._text = text
+        self._pattern = pattern
+        self._from, self._at = 1, 0
+
+    def __call__(self, i: int) -> int:
+        if self._from <= i <= self._at:
+            return self._at
+        found = self._pattern.search(self._text, i)
+        self._from, self._at = i, found.start() if found else len(self._text)
+        return self._at
+
+
+def _css_urls(css: str) -> Iterator[str]:
+    """What each `url(...)` holds, in order, as the pattern above reads it.
+
+    Each branch ends where the first character it cannot hold stands, so the stops are found
+    once and remembered instead of walked to again from every `url(`.
+    """
+    unquoted_end = _Stop(css, _CSS_UNQUOTED_STOP)
+    non_space = _Stop(css, _NOT_SPACE)
+    length = len(css)
+    position = 0
+    while (opening := _CSS_URL_OPEN.search(css, position)) is not None:
+        start = non_space(opening.end())
+        found: tuple[str, int] | None = None
+        if start < length and css[start] in "\"'":
+            closing = css.find(css[start], start + 1)
+            if closing != -1:
+                after = non_space(closing + 1)
+                if after < length and css[after] == ")":
+                    found = (css[start + 1 : closing], after + 1)
+        if found is None:
+            end = unquoted_end(start)
+            after = non_space(end)
+            if after < length and css[after] == ")":
+                found = (css[start:end], after + 1)
+        if found is None:
+            position = opening.start() + 1
+            continue
+        yield found[0]
+        position = found[1]
 
 
 def scan_html(html: str, should_stop: Callable[[], bool] | None = None) -> HtmlScan:
