@@ -325,3 +325,40 @@ def test_a_candidate_across_the_chunk_size_is_found_whole(client: TestClient) ->
 
     assert _values(found, "url") == [url]
     assert _values(found, "domain") == ["straddle.example.net"]
+
+
+def test_a_candidate_may_start_inside_a_run_another_one_ended_in(client: TestClient) -> None:
+    """SPEC §11.2: the earliest match wins, and the scan resumes where it ended.
+
+    Where the next candidate may start is the first place after the end of the last one that
+    its grammar admits, which can be inside the same run of characters: a quotation mark, a
+    hyphen, the letter after two periods, a URL after an address. Reading each run from its
+    start, or resuming the scan anywhere else, would change these readings, of an address and
+    of a URL alike; they are what a change to how the grammar is applied has to keep, or
+    record as a decision.
+    """
+    cases = {
+        "x:/y'z@a.example.com": [
+            ("url", "x:/y"),
+            ("email", "'z@a.example.com"),
+            ("domain", "a.example.com"),
+        ],
+        "http://h.example.com/p'q@r.example.com": [
+            ("url", "http://h.example.com/p"),
+            ("domain", "h.example.com"),
+            ("email", "'q@r.example.com"),
+            ("domain", "r.example.com"),
+        ],
+        "::1.a-b@c.example.com": [("email", "-b@c.example.com"), ("domain", "c.example.com")],
+        "a.b..c@d.example.com": [("email", "c@d.example.com"), ("domain", "d.example.com")],
+        "u@a.example.org/https://b.example.net/": [
+            ("email", "u@a.example.org"),
+            ("domain", "a.example.org"),
+            ("url", "https://b.example.net/"),
+            ("domain", "b.example.net"),
+        ],
+        "a'http://f.example.net/": [("url", "http://f.example.net/"), ("domain", "f.example.net")],
+    }
+    for text, expected in cases.items():
+        found = _observables(client, f"see {text} now")
+        assert [(o["type"], o["value"]) for o in found] == expected, text

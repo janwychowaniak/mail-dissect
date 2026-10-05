@@ -8,8 +8,9 @@ against the versions in `uv.lock`; F20 on **2026-10-01** with
 [`probes/observables.py`](probes/observables.py), which measures the service's own grammars and
 was run inside the published 0.4.0 image and on the tree that became 0.5.0; F21 on
 **2026-10-03** with `probes/email_stdlib.py`, on 3.13.12 and on 3.13.15 inside the published
-0.5.0 image; F23 on **2026-10-05** with `probes/email_stdlib.py`, on 3.13.12 and on 3.13.16
-inside the published 0.6.0 image. Each of them is printed by one function in its script; re-run the script against a
+0.5.0 image; F22 on **2026-10-05** with [`probes/grammar.py`](probes/grammar.py), on 3.13.12
+against the tree of `v0.6.0`; F23 on **2026-10-05** with `probes/email_stdlib.py`, on 3.13.12
+and on 3.13.16 inside the published 0.6.0 image. Each of them is printed by one function in its script; re-run the script against a
 newer interpreter, dependency or release to see whether a finding still holds. The scripts are
 offline and read-only. F13 to F16 each say how they were measured.
 
@@ -63,6 +64,12 @@ number, as F15 was.
   nothing pinned. `policy.default` is no better a rule: it keeps the white space at a segment
   boundary and takes whichever of two forms comes first. Hence `[D27]`: the name is read with
   the grammar of unstructured text, by a rule written as its result. (F21)
+- The defanged path of 0.6.0 grows a marker over a fixed set of characters and then demands
+  that the whole token be one candidate: a mark in front of the form loses it, a character
+  outside the set cuts or distorts it, and a run of markers costs about 150 µs a character.
+  Separately, about one unit in ten, repeated into a run with no white space, makes the
+  grammar's cost grow faster than linearly. `probes/grammar.py` also holds the comparison every
+  change to the grammar in 0.7.0 is held to: zero differences, or each one recorded. (F22)
 - `html.parser` fed in pieces reads a document the way it reads it fed at once only where the
   interpreter decides the end of an empty comment without looking ahead: 3.13.16 does, 3.13.12
   does not. The parse of `<!-->` itself moved between the two. Hence the HTML scan is fed once
@@ -683,7 +690,8 @@ A defanged form is found by growing its marker outwards to the token that contai
 hyphen or a period in front is taken along as part of that token; re-armed, the token no longer
 reads as anything. The same text without the defanging is returned. This is a different
 mechanism from the one above and `[D26]` does not touch it: it is a known defect, listed in
-`CHANGELOG.md` and stated by `tests/test_known_defects.py`.
+`CHANGELOG.md` and stated by `tests/test_known_defects.py`. F22 measures the mechanism on its
+own, and what else it cuts, distorts and costs.
 
 ## F21 — a filename read by three grammars, and which one moved
 
@@ -736,6 +744,71 @@ the ends, and shows one parameter where two were written.
 The grammar of unstructured text joined two encoded-words and left everything else as written
 for every shape measured, on both interpreters. Hence `[D27]`: the plain form is read with it,
 and the rule is written down as its result rather than as any one of these readings.
+
+---
+
+## F22 — the indicator grammar: where the defanged path loses a candidate, and what a run costs
+
+Probed with `probes/grammar.py` on 3.13.12. `defang v0.6.0` and `sweep v0.6.0` measure the
+grammar as 0.6.0 shipped it; `layer1` and `layer2` are the comparison the changes to the
+grammar in 0.7.0 are held to, and their first run is recorded at the end.
+
+**The defanged path.** A defanged form is found by locating its marker (`[.]`, `[at]`, …),
+growing it outwards over the characters `A-Z a-z 0-9 [ ] ( ) { } @ : . _ / -`, at most 2,048
+on each side, re-arming the token, and requiring the whole of it to be one candidate of one
+grammar. Three properties follow from that construction:
+
+| Written | 0.6.0 returns |
+| --- | --- |
+| `- one[.]example[.]net`, `. one[.]example[.]net` (the control) | `one.example.net`, `defanged` |
+| `-one[.]example[.]net`, `.one[.]example[.]net` | nothing |
+| `-hxxp://two[.]example[.]net/path`, `-user[at]three[.]example[.]net`, `-192[.]0[.]2[.]201` | nothing |
+| `x (hxxp://two[.]example[.]net/path) y`, `x [one[.]example[.]net] y` | nothing |
+| `x one.example.com(two[.]example[.]net) y` | nothing, not even the plain domain in front |
+| `x hxxp://two[.]example[.]net/p?q=1&r=2 y` | `http://two.example.net/p` |
+| `x hxxp://two[.]example[.]net/~user y` | `http://two.example.net/` |
+| `x first.last+tag[at]three[.]example[.]net y` | `tag@three.example.net` |
+| `x bücher[.]de y` | `cher.de` |
+
+- **A mark in front of the form is grown into the token**, and the token as a whole is no
+  candidate, so nothing is returned: after a hyphen or a period (the known defect), and by the
+  same mechanism after a bracket or a parenthesis, which a sentence puts around a form as often
+  as a hyphen before it.
+- **A character outside the set ends the growth inside a candidate**, and what is left is cut
+  (`?q=1&r=2`, `~user`) or distorted into another candidate (`tag@…` for `first.last+tag@…`,
+  `cher.de` for `bücher.de`).
+- **Every marker is grown**, so a run of markers costs about 147 µs a character: 7.31, 14.55
+  and 29.51 s for 50k, 100k and 200k characters of `a[.]`, against 0.02, 0.03 and 0.07 s for
+  the same run written plainly (`a.`).
+
+**The grammar on a run.** `sweep` repeats a unit into a run with no white space and doubles the
+run from 1,000 characters until one scan takes 0.2 s or the run reaches 128,000, best of two.
+The verdict is read from the last doubling, at a size where a per-call cost no longer hides
+the term looked for, never from the first ones, where it does. The units are every unit of
+one and two symbols and 500 seeded longer ones, 1,690 in all. On 0.6.0, 176 of them grow
+faster than linearly at their last doubling (ratio above 3), at 2,000 or 4,000 characters,
+each costing 115–140 µs a character there: half a second for 4,000 characters, with the
+cost growing as the square of the length. A second run, on a tree whose grammar is the same,
+counted 173: units near the threshold move between runs, and the count is a size, not an
+identifier. The defanged path is among them (`[.]}{.}`); so are the shapes where an address
+or a URL may start at every word boundary of a run and read to its end before failing (`a-`,
+`-a`, `a/`, `=a`). Which alternative each one costs is shown by the changes that remove it,
+and recorded with them.
+
+**The comparison every change to the grammar is held to.** `layer1` compares, for each of
+8,318 generated strings, the spans `_scan` takes and the candidates made from them, between
+two trees; `layer2` compares the full response of every message the test suite sends, the
+saved messages and the golden samples, with the tools absent and present. Each prints a
+positive control, the same comparison with one input changed. Zero differences is the
+criterion, or each difference is recorded as a decision.
+
+The first run, `v0.6.0` against the tree that wrote this entry, which already skips a run past
+`MAX_RUN_LENGTH` `[D29]`: `layer1` 0 of 8,318 strings differ, the control 1 of 1; `layer2`
+603 messages, 1,206 responses, 10 differ, the control 2 of 2 (one message in both modes).
+The ten are five messages in both modes, each one with a run past the limit: the three
+messages of the pair test past the limit, which lose the URL and its host and gain
+`truncated`; the cost test's, which gains `truncated`; and a 3 MiB body of one run of `x`
+from the form-channel test, which gains `truncated` and nothing else.
 
 ---
 

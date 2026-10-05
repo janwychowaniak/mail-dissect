@@ -132,8 +132,8 @@ implementation is worse than no test, because it is counted as coverage.
 
 **One rule, because the forms keep changing.** Every failure of this discipline so far has
 been the same thing wearing a different coat: **the test was green for a reason that has
-nothing to do with the behaviour it describes.** Seven forms have turned up so far, in tests and
-in measurements alike, and the eighth will not look like any of them — which is why the rule is
+nothing to do with the behaviour it describes.** Eight forms have turned up so far, in tests and
+in measurements alike, and the ninth will not look like any of them — which is why the rule is
 worth more than the list:
 
 - **An assertion that cannot fail.** `assert uptime_seconds >= 0` passed for months of
@@ -170,7 +170,19 @@ worth more than the list:
   showed under mutation: with the lookbehind for a label character taken out, `v192.0.2.1` was
   still refused, by the neighbour, and only `_192.0.2.1` and `é192.0.2.1` went red. A case that
   stays green with its rule removed describes the neighbour. Put the property in the rule
-  itself, and keep a case that nothing else covers.
+  itself, and keep a case that nothing else covers. It came back with `[D29]`: a cost test of
+  two runs at the limit stayed green with the search for long runs unanchored, because each run
+  ended its own chunk of the scan and left the slow search nothing to count into. The test
+  that goes red puts both runs in one chunk.
+- **A verdict read where the term being looked for is still hidden under another.** A screen
+  for quadratic cost passed the unstructured header parser on `a ` — a letter and a space,
+  repeated — because it asked for two consecutive doublings above 2.8, and at 32k characters
+  the parser's linear cost per step still dominated: ×2.05 there, ×3.5 from 128k to 256k.
+  "Linear" was read off sizes where the quadratic term was too small to see, and a mechanism
+  was proposed on the strength of it. A verdict of linear is read from the last doubling, best
+  of two, at sizes where the linear term no longer dominates; and a parser that splits on white
+  space gets inputs with white space in them, because a run without any is one token and
+  linear by construction.
 
 **Mutation is a ritual of every stage, not a gesture.** Before a stage is pushed, pick its
 load-bearing behaviours, break each one in the source on purpose, and check that the tests
