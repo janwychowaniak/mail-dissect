@@ -235,6 +235,8 @@ def _apply_document_text(item: _Built, info: PartInfo, text: str, assembly: _Ass
         if attachment.part_index == info.index:
             attachment.text_artifact_id = artifact_id
     item.collector.feed_text(text, Source(kind="attachment", part_index=info.index))
+    if item.collector.stopped:
+        assembly.flags.add("truncated")
 
 
 def _type_for_the_extractor(info: PartInfo) -> str:
@@ -356,7 +358,9 @@ def _build_message(
         "headers", header_block, message_index=index, filename=f"headers-{index}.txt"
     )
 
-    scan = _scan_body_html(parsed)
+    scan = _scan_body_html(parsed, deadline)
+    if scan is not None and scan.stopped:
+        assembly.flags.add("truncated")
     cid_map = _cid_map(parsed)
     body = _build_body(parsed, assembly, settings, scan)
     links, resources = _build_addresses(scan, assembly, cid_map)
@@ -417,14 +421,12 @@ def _scan_observables(
     can only extend the tail - the deterministic core of the list does not move when the
     text extractor is absent or fails (test 62).
 
-    The deadline is checked here, between messages `[D10]`. A message whose scan would start
-    after it is still returned, since it was parsed in time, with no candidates.
+    The collector asks the deadline before every chunk it scans `[D10]`, so a message whose
+    scan would start after the deadline is still returned, since it was parsed in time, with
+    no candidates, and a scan the deadline overtakes keeps what it found before it.
     """
     assert assembly.registries is not None
-    collector = Collector(assembly.registries)
-    if deadline.expired():
-        assembly.flags.add("truncated")
-        return collector
+    collector = Collector(assembly.registries, should_stop=deadline.expired)
 
     for name, values in parsed.headers.items():
         for index, value in enumerate(values):
@@ -447,6 +449,8 @@ def _scan_observables(
                 # so the two lists and this one describe the same thing (SPEC §11).
                 collector.feed_url(assembly.unwrapper.apply(event.href).href, source)
 
+    if collector.stopped:
+        assembly.flags.add("truncated")
     return collector
 
 
@@ -511,13 +515,13 @@ def _build_attachment(info: PartInfo, assembly: _Assembly, message_index: int) -
     )
 
 
-def _scan_body_html(parsed: ParsedMessage) -> HtmlScan | None:
+def _scan_body_html(parsed: ParsedMessage, deadline: Deadline) -> HtmlScan | None:
     """One scan of the HTML body, shared by everything derived from it (SPEC §9)."""
     index = parsed.tree.body_html_index
     if index is None:
         return None
     info = parsed.tree.parts[index]
-    return scan_html(info.text.text) if info.text else None
+    return scan_html(info.text.text, should_stop=deadline.expired) if info.text else None
 
 
 def _cid_map(parsed: ParsedMessage) -> dict[str, int]:

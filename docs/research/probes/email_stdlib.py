@@ -2,7 +2,8 @@
 
 Run:  python3.13 docs/research/probes/email_stdlib.py
 
-Findings F1 to F10, F17 to F19 and F21 in ../NOTES.md are produced by one function each here.
+Findings F1 to F10, F17 to F19, F21 and F23 in ../NOTES.md are produced by one function each
+here.
 The probes are read-only, offline, and depend on nothing but the standard library, so
 anyone can re-run them against a newer interpreter and see whether a finding still
 holds. Print output is the evidence; keep it terse enough to paste.
@@ -12,6 +13,7 @@ from __future__ import annotations
 
 import email
 import email.policy
+import random
 import sys
 import time
 from email import message_from_bytes
@@ -451,6 +453,104 @@ def f21_a_filename_read_by_three_grammars() -> None:
         )
 
 
+def f23_html_parser_fed_in_pieces() -> None:
+    """Does html.parser read the same document fed at once and fed in pieces cut before a `<`?"""
+    _banner("F23", "html.parser fed in pieces")
+    from html.parser import HTMLParser
+
+    class Recorder(HTMLParser):
+        def __init__(self) -> None:
+            super().__init__(convert_charrefs=True)
+            self.events: list[tuple[str, str]] = []
+
+        def handle_starttag(self, tag: str, attrs: object) -> None:
+            self.events.append(("start", tag))
+
+        def handle_endtag(self, tag: str) -> None:
+            self.events.append(("end", tag))
+
+        def handle_data(self, data: str) -> None:
+            self.events.append(("data", data))
+
+        def handle_comment(self, data: str) -> None:
+            self.events.append(("comment", data))
+
+    def read(pieces: list[str]) -> list[tuple[str, str]]:
+        parser = Recorder()
+        for piece in pieces:
+            parser.feed(piece)
+        parser.close()
+        return parser.events
+
+    def before_lt(doc: str, size: int) -> list[str]:
+        """Pieces of at least `size` characters, each cut just before a `<`."""
+        pieces, start = [], 0
+        while len(doc) - start > size:
+            cut = doc.find("<", start + size)
+            if cut < 0:
+                break
+            pieces.append(doc[start:cut])
+            start = cut
+        return [*pieces, doc[start:]]
+
+    for doc in ("<!--><b>x</b>-->", "<!---><b>x</b>-->", "<!-- c --><b>x</b>"):
+        cut = doc.index("<b>")
+        whole, split = read([doc]), read([doc[:cut], doc[cut:]])
+        print(f"{doc!r:22s} at once={whole}")
+        print(f"{'':22s} in two={split}  same={whole == split}")
+
+    pieces = [
+        "word ",
+        "a&amp;b ",
+        "a & b ",
+        "x&y",
+        "&",
+        "a < b ",
+        "<",
+        "<3 ",
+        "<p>",
+        "</p>",
+        "<br/>",
+        '<a href="h">',
+        "</a>",
+        '<span title="x<y>z">',
+        "</span>",
+        "<!-- c < d -->",
+        "-->",
+        "<style>",
+        "a<b {}",
+        "</styl",
+        "</style>",
+        "<script>",
+        "if (a < b) {}",
+        "</scr",
+        "</script>",
+        "<![CDATA[x<y]]>",
+        "<!DOCTYPE html>",
+        "<?pi?>",
+        "</ x>",
+        "<a",
+        "</",
+        "\n",
+    ]
+    openers = ["<!-->", "<!--"]
+    for label, alphabet in (("with <!--> and <!--", pieces + openers), ("without them", pieces)):
+        rng = random.Random(23)
+        docs = [
+            "".join(rng.choice(alphabet) for _ in range(rng.randint(1, 60))) for _ in range(2000)
+        ]
+        differ = sum(
+            read(before_lt(doc, size)) != read([doc]) for doc in docs for size in (1, 3, 8)
+        )
+        control = sum(
+            read([doc[i : i + 3] for i in range(0, len(doc), 3)]) != read([doc]) for doc in docs
+        )
+        print(
+            f"{label:20s} pieces cut before '<' differ in {differ} of {len(docs) * 3}; "
+            f"control, cut every 3 characters: {control} of {len(docs)}"
+        )
+
+
 def main() -> int:
     print(f"python {sys.version}")
     f1_nested_reserialisation_is_not_byte_identical()
@@ -467,6 +567,7 @@ def main() -> int:
     f18_the_registry_does_not_unfold()
     f19_an_address_written_inside_quotes()
     f21_a_filename_read_by_three_grammars()
+    f23_html_parser_fed_in_pieces()
     return 0
 
 

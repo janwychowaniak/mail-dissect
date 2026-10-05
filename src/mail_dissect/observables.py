@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 
 from .models import ObservableSubtype, ObservableType, SourceKind
@@ -92,6 +93,14 @@ _DEFANG_TOKEN_CHARS = frozenset(
 )
 _MAX_DEFANG_TOKEN = 2048
 
+# A text is scanned in chunks, and the deadline is asked between them `[D10]`. A chunk ends
+# just before a white-space character, and no candidate contains one, so the chunks give
+# exactly what the whole text gives. Every lookaround reads at most two characters beyond a
+# match, and white space and the end of a chunk look the same to each of them: neither is a
+# label character, a period or a hyphen.
+_CHUNK = 65_536
+_WHITE_SPACE = re.compile(r"\s")
+
 _TRAILING_PUNCTUATION = ".,;:!?\"'"
 _CLOSERS = {")": "(", "]": "[", "}": "{"}
 _HASH_SUBTYPES: dict[int, ObservableSubtype] = {
@@ -130,12 +139,18 @@ class Collector:
     same entries in the same positions and a longer list.
     """
 
-    __slots__ = ("_order", "_registries", "_seen")
+    __slots__ = ("_order", "_registries", "_seen", "_should_stop", "stopped")
 
-    def __init__(self, registries: Registries) -> None:
+    def __init__(
+        self, registries: Registries, should_stop: Callable[[], bool] | None = None
+    ) -> None:
         self._registries = registries
         self._seen: dict[tuple[str, str], Candidate] = {}
         self._order: list[Candidate] = []
+        # The deadline, asked before every chunk and every address `[D10]`. Once it has said
+        # stop, nothing more is added: the list ends where the scan stopped.
+        self._should_stop = should_stop
+        self.stopped = False
 
     def feed_text(self, text: str, source: Source) -> None:
         """Scan a blob; overlapping matches are resolved once, in document order.
@@ -144,20 +159,28 @@ class Collector:
         syntactically valid scheme, so the URL grammar would otherwise swallow
         `hxxp://zly[.]host` and hand back a broken address.
         """
-        for kind, raw in _scan(text):
-            trimmed = _trim(raw)
-            if trimmed:
-                self._classify(kind, trimmed, source)
+        for chunk in _chunks(text):
+            if self._stop():
+                return
+            for kind, raw in _scan(chunk):
+                trimmed = _trim(raw)
+                if trimmed:
+                    self._classify(kind, trimmed, source)
 
     def feed_url(self, href: str, source: Source) -> None:
         """An address taken from an anchor or a resource, which needs no grammar to find."""
-        if not href:
+        if not href or self._stop():
             return
         self._emit(href, href, "url", source)
         self._fan_out_url(href, href, source, defanged=False)
 
     def finish(self) -> list[Candidate]:
         return self._order
+
+    def _stop(self) -> bool:
+        if not self.stopped and self._should_stop is not None and self._should_stop():
+            self.stopped = True
+        return self.stopped
 
     # -- classification ----------------------------------------------------------------
     def _classify(self, kind: str, raw: str, source: Source) -> None:
@@ -269,6 +292,19 @@ class Collector:
         # [D14]: `sources` lists distinct PLACES; five hits in one body is one source.
         if source not in candidate.sources:
             candidate.sources.append(source)
+
+
+def _chunks(text: str) -> Iterator[str]:
+    """The text in pieces of at least `_CHUNK` characters, each cut before white space."""
+    start, length = 0, len(text)
+    while length - start > _CHUNK:
+        cut = _WHITE_SPACE.search(text, start + _CHUNK)
+        if cut is None:
+            break
+        yield text[start : cut.start()]
+        start = cut.start()
+    if start < length:
+        yield text[start:]
 
 
 def _scan(text: str) -> list[tuple[str, str]]:

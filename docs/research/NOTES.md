@@ -8,7 +8,8 @@ against the versions in `uv.lock`; F20 on **2026-10-01** with
 [`probes/observables.py`](probes/observables.py), which measures the service's own grammars and
 was run inside the published 0.4.0 image and on the tree that became 0.5.0; F21 on
 **2026-10-03** with `probes/email_stdlib.py`, on 3.13.12 and on 3.13.15 inside the published
-0.5.0 image. Each of them is printed by one function in its script; re-run the script against a
+0.5.0 image; F23 on **2026-10-05** with `probes/email_stdlib.py`, on 3.13.12 and on 3.13.16
+inside the published 0.6.0 image. Each of them is printed by one function in its script; re-run the script against a
 newer interpreter, dependency or release to see whether a finding still holds. The scripts are
 offline and read-only. F13 to F16 each say how they were measured.
 
@@ -62,6 +63,10 @@ number, as F15 was.
   nothing pinned. `policy.default` is no better a rule: it keeps the white space at a segment
   boundary and takes whichever of two forms comes first. Hence `[D27]`: the name is read with
   the grammar of unstructured text, by a rule written as its result. (F21)
+- `html.parser` fed in pieces reads a document the way it reads it fed at once only where the
+  interpreter decides the end of an empty comment without looking ahead: 3.13.16 does, 3.13.12
+  does not. The parse of `<!-->` itself moved between the two. Hence the HTML scan is fed once
+  and stopped from inside when the deadline passes `[D10]`, never fed in pieces. (F23)
 
 ---
 
@@ -731,3 +736,51 @@ the ends, and shows one parameter where two were written.
 The grammar of unstructured text joined two encoded-words and left everything else as written
 for every shape measured, on both interpreters. Hence `[D27]`: the plain form is read with it,
 and the rule is written down as its result rather than as any one of these readings.
+
+---
+
+## F23 — `html.parser` fed in pieces: where an empty comment ends depends on what has arrived
+
+Probed with `f23_html_parser_fed_in_pieces` in `probes/email_stdlib.py` on 3.13.12 and on
+3.13.16 inside the published 0.6.0 image.
+
+The deadline has to stop the HTML scan somewhere `[D10]`. The obvious way is to feed the parser
+in pieces and ask the deadline between them, each piece cut just before a `<`, where a text
+node ends anyway. That reads the document as one feed does only if the parser decides nothing
+on the strength of what it has not been given yet.
+
+| The document, cut before `<b>` | 3.13.12, at once | 3.13.12, in two pieces | 3.13.16, either way |
+| --- | --- | --- | --- |
+| `<!--><b>x</b>-->` | one comment, `><b>x</b>` | an empty comment, `b`, `x`, `-->` as text | an empty comment, `b`, `x`, `-->` as text |
+| `<!---><b>x</b>-->` | one comment, `-><b>x</b>` | as above | as above |
+| `<!-- c --><b>x</b>` (the control) | a comment, `b`, `x` | the same | the same |
+
+**What moved is `parse_comment`.** 3.13.12 looks for a `-->` anywhere in what it holds, and
+takes the abrupt close of an empty comment (`<!-->`, `<!--->`) only when there is none, so
+the result depends on whether the rest of the document has arrived. 3.13.16 takes the abrupt
+close first, as HTML5 does, and gives one result either way. Which patch release made the
+change was not measured.
+
+On 2 000 generated documents, each fed in pieces of at least 1, 3 and 8 characters cut before a
+`<` and compared with one feed: 1 283 of 6 000 differ on 3.13.12 and none on 3.13.16. Without
+the two comment openers in the generator, none differ on 3.13.12 either. The control cuts every
+three characters, wherever that falls, and differs on 1 513 of 2 000 documents on 3.13.12 and
+1 236 on 3.13.16, so the comparison sees a difference when there is one.
+
+Two consequences:
+
+- **The parse of `<!-->` moved.** Text after it, up to a later `-->`, is a comment on 3.13.12
+  and text on 3.13.16. So `text_from_html`, and the candidates read from the HTML text,
+  follow the image's interpreter for such a document. That is F10's "behaviour that depends
+  only on CPython's version", made concrete.
+- **Pieces read like one feed only by the interpreter's grace.** Hence the HTML scan is fed
+  once, and the deadline is asked from inside, before each start tag, end tag, run of text and
+  comment the parser hands over. When it has passed, the scan stops there. That reads the same
+  on every interpreter, because nothing about the parse changes.
+
+The text scan needs no such care. A chunk cut just before white space gives exactly what the
+whole text gives, because no candidate contains white space and every lookaround of the
+grammar reads white space and the end of a chunk alike.
+`test_observables::test_a_text_scanned_in_chunks_gives_what_one_scan_gives` compares the two on
+generated texts. The same comparison on 4 000 texts, run with the branch's source inside the
+0.6.0 image, gave no difference on 3.13.16 either.

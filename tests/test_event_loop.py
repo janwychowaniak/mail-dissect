@@ -22,7 +22,7 @@ from fastapi.testclient import TestClient
 
 from mail_dissect import app as app_module
 from mail_dissect import dissect as dissect_module
-from mail_dissect import routes
+from mail_dissect import htmlscan, observables, routes
 from mail_dissect.app import create_app
 from mail_dissect.artifacts import ArtifactStore
 from mail_dissect.models import DissectResponse
@@ -218,3 +218,90 @@ def test_a_message_scanned_after_the_deadline_gives_no_candidates(
     assert "outer.example.net" in values(late["messages"][0])
     assert late["messages"][1]["headers"]["from"] == ["n@example.org"]
     assert values(late["messages"][1]) == []
+
+
+def _all_values(body: dict[str, Any]) -> list[str]:
+    return [item["value"] for item in body["messages"][0]["observables"]]
+
+
+def test_a_scan_stops_between_chunks_at_the_deadline(
+    settings: Settings, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`[D10]`: the scan asks the deadline before every chunk, and once it has passed adds nothing.
+
+    The clock passes the deadline as soon as the first chunk of a long body text has been
+    handed out. The candidate in the second chunk is not returned, and neither is the HTML
+    body's anchor, which is scanned after the text. The anchor is still in `links[]`, because
+    the HTML was read before the deadline: only the scan that feeds the list stopped. The
+    control is the same message with the clock standing still.
+    """
+    text = "first.example.net " + "w " * observables._CHUNK + "second.example.net"
+    raw = b.multipart(
+        "alternative",
+        b.part("text/plain", text.encode()),
+        b.part("text/html", b'<a href="http://anchor.example.org/">here</a>'),
+    )
+    chunks = observables._chunks
+    advance = {"seconds": 0.0}
+
+    def advancing(value: str) -> Any:
+        for index, chunk in enumerate(chunks(value)):
+            yield chunk
+            if index == 0 and len(value) > observables._CHUNK:
+                clock.advance(advance["seconds"])
+
+    monkeypatch.setattr(observables, "_chunks", advancing)
+
+    with TestClient(create_app(settings, clock=clock)) as client:
+        still = dissect(client, raw)
+        advance["seconds"] = settings.dissect_timeout_seconds + 1
+        late = dissect(client, raw)
+
+    assert still["flags"] == []
+    assert {"first.example.net", "second.example.net", "anchor.example.org"} <= set(
+        _all_values(still)
+    )
+    assert "truncated" in late["flags"]
+    assert "first.example.net" in _all_values(late)
+    assert "second.example.net" not in _all_values(late)
+    assert "anchor.example.org" not in _all_values(late)
+    assert [link["host"] for link in late["messages"][0]["links"]] == ["anchor.example.org"]
+
+
+def test_the_html_scan_stops_at_the_deadline(
+    settings: Settings, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`[D10]`: the HTML scan asks the deadline before each thing the parser hands over.
+
+    The clock passes the deadline as soon as the first anchor has been read. The second
+    anchor is not, so `links[]` and the candidates end with the first. The control is the
+    same message with the clock standing still.
+    """
+    raw = b.message(
+        {"Content-Type": "text/html"},
+        body=b'<a href="http://one.example.net/">one</a> <a href="http://two.example.net/">two</a>',
+    )
+    close = htmlscan._Scanner._close_anchor
+    advance = {"seconds": 0.0}
+
+    def close_then_advance(self: Any) -> None:
+        had_anchor = self._anchor is not None
+        close(self)
+        if had_anchor:
+            clock.advance(advance["seconds"])
+
+    monkeypatch.setattr(htmlscan._Scanner, "_close_anchor", close_then_advance)
+
+    with TestClient(create_app(settings, clock=clock)) as client:
+        still = dissect(client, raw)
+        advance["seconds"] = settings.dissect_timeout_seconds + 1
+        late = dissect(client, raw)
+
+    def hosts(body: dict[str, Any]) -> list[str]:
+        return [link["host"] for link in body["messages"][0]["links"]]
+
+    assert still["flags"] == []
+    assert hosts(still) == ["one.example.net", "two.example.net"]
+    assert "truncated" in late["flags"]
+    assert hosts(late) == ["one.example.net"]
+    assert "two.example.net" not in _all_values(late)

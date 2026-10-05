@@ -5,13 +5,18 @@ Acceptance cases 22, 24, 25, 26, 27, 28, 32, 33, 34, 35, 56, 66.
 
 from __future__ import annotations
 
+import random
 import time
 
 import builders as b
+import pytest
 from conftest import FakeClock, dissect
 from fastapi.testclient import TestClient
 
+from mail_dissect import observables
 from mail_dissect.app import create_app
+from mail_dissect.observables import Collector, Source
+from mail_dissect.registries import Registries
 from mail_dissect.settings import Settings
 
 
@@ -252,3 +257,71 @@ def test_a_base64_heavy_body_does_not_blow_up_the_scan(client: TestClient) -> No
 
     assert found == []
     assert elapsed < 5.0, f"took {elapsed:.1f}s on {len(body) / 1000:.0f} kB of base64"
+
+
+# Pieces of every grammar, its marks and its neighbours, and white space of every kind the
+# grammar's `\s` knows: generated texts cross each of them with a chunk boundary.
+_PIECES = [
+    *("a", "b", "-", ".", "@", ":", "/", "_", "+", "=", "%", "~", "1", "é", "ł"),
+    *("[.]", "(.)", "[dot]", "[at]", "[:]", "hxxp://", "http://", "www.", "mailto:"),
+    *("example", "net", "user", "192.0.2.1", "2001:db8::1", "d41d8cd98f00b204e9800998ecf8427e"),
+    *("(", ")", "[", "]", "{", "}", ",", ";", "!", "?", "'", '"', "<", ">", "x.zip", "a.b..c"),
+    *(" ", " ", "\t", "\n", "\r\n", "\u00a0", "\u2003", "\u3000", "\u2028", "\x1c", "\x85"),
+]
+
+
+_REGISTRIES = Registries.load()
+
+
+def _collect(text: str) -> list[tuple[object, ...]]:
+    collector = Collector(_REGISTRIES)
+    collector.feed_text(text, Source(kind="body_text", part_index=0))
+    return [
+        (c.value, c.value_raw, c.type, c.subtype, c.defanged, c.ambiguous, c.occurrences)
+        for c in collector.finish()
+    ]
+
+
+def test_a_text_scanned_in_chunks_gives_what_one_scan_gives(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`[D10]`: a text is scanned in chunks cut before white space, with the deadline between.
+
+    No candidate contains white space, so the chunks must give what one scan gives. The texts
+    are generated, and the chunks are a few characters long, so nearly every white space is a
+    cut. The control cuts at fixed offsets instead, through the same collector, and must
+    differ: without it, chunks that never split anything would pass.
+    """
+    rng = random.Random(20261005)
+    texts = ["".join(rng.choice(_PIECES) for _ in range(rng.randint(1, 80))) for _ in range(400)]
+    monkeypatch.setattr(observables, "_CHUNK", 10**9)
+    whole = [_collect(text) for text in texts]
+    assert sum(bool(found) for found in whole) > 300
+
+    for size in (1, 2, 5):
+        monkeypatch.setattr(observables, "_CHUNK", size)
+        assert sum(len(list(observables._chunks(text))) > 1 for text in texts) > 300
+        assert [_collect(text) for text in texts] == whole
+
+    def fixed(text: str) -> list[str]:
+        return [text[i : i + 3] for i in range(0, len(text), 3)]
+
+    monkeypatch.setattr(observables, "_chunks", fixed)
+    assert [_collect(text) for text in texts] != whole
+
+
+def test_a_candidate_across_the_chunk_size_is_found_whole(client: TestClient) -> None:
+    """The real chunk size, with a URL that starts before it and ends after it.
+
+    A cut at the size itself rather than at the next white space would return the URL in two
+    pieces and its host from the first one.
+    """
+    url = "http://straddle.example.net/a/long/path"
+    head = "w " * ((observables._CHUNK - 10) // 2)
+    text = f"{head}{url} and after"
+    assert len(head) < observables._CHUNK < len(head) + len(url)
+
+    found = _observables(client, text)
+
+    assert _values(found, "url") == [url]
+    assert _values(found, "domain") == ["straddle.example.net"]

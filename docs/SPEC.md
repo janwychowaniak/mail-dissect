@@ -921,8 +921,11 @@ anything.
 **The whole budget is enforced at work-unit boundaries** — a message, an attachment, a single
 dependency call — and not in the middle of parsing: the service checks the deadline between
 units and stops before the next one, returning what it has computed `[D10]`. A message parsed in
-time is returned whole, and if the deadline has passed by the time its scan would start, it is
-returned with no candidates. The asynchronous
+time is returned whole. Its scan asks the deadline as it goes: before every chunk of text, each
+cut just before white space, and before everything the HTML parser hands over. Once the
+deadline has passed, the scan adds nothing more. A message reached late has no candidates, one
+overtaken keeps what was found before, and its `links[]`, `resources[]` and `text_from_html`
+end where the HTML scan stopped. The asynchronous
 model does not exempt us from this: a limit placed on an I/O operation cancels the wait but
 does not interrupt parsing in progress, so without an explicit deadline `truncated` is
 unimplementable, not merely imprecise.

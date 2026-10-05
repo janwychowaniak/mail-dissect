@@ -13,6 +13,7 @@ and the HTML half of the observables scan are all consumers of it. That is what 
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 
@@ -121,6 +122,8 @@ Event = TextEvent | AnchorEvent | ResourceEvent
 class HtmlScan:
     events: list[Event] = field(default_factory=list)
     _text_parts: list[str] = field(default_factory=list)
+    # The deadline stopped the scan, so the events end where it stopped.
+    stopped: bool = False
 
     def text(self) -> str:
         """The deterministic text rendering of SPEC §9.3."""
@@ -132,15 +135,32 @@ class HtmlScan:
         return joined.strip()
 
 
+class _Stopped(Exception):
+    """The deadline passed while the parser was reading."""
+
+
 class _Scanner(HTMLParser):
-    def __init__(self) -> None:
+    def __init__(self, should_stop: Callable[[], bool] | None = None) -> None:
         super().__init__(convert_charrefs=True)
         self.scan = HtmlScan()
         self._dropping: list[str] = []
         self._anchor: tuple[str, str, list[str]] | None = None
+        self._should_stop = should_stop
+
+    def _check(self) -> None:
+        """Asked before each thing the parser hands over `[D10]`.
+
+        The parser is fed once and stopped from inside, never fed in pieces. Where a comment
+        ends depends on what the parser has been given so far on some interpreters, so a
+        piece that ends inside one changes what it reads (F23).
+        """
+        if self._should_stop is not None and self._should_stop():
+            self.scan.stopped = True
+            raise _Stopped
 
     # -- structure ---------------------------------------------------------------------
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._check()
         name = tag.lower()
         values = {key.lower(): (value or "") for key, value in attrs}
 
@@ -170,6 +190,7 @@ class _Scanner(HTMLParser):
             self._dropping.pop()
 
     def handle_endtag(self, tag: str) -> None:
+        self._check()
         name = tag.lower()
         if name in _DROPPED_CONTENT:
             if self._dropping:
@@ -183,6 +204,7 @@ class _Scanner(HTMLParser):
             self._emit_text(" ")
 
     def handle_data(self, data: str) -> None:
+        self._check()
         if self._dropping:
             if self._dropping[-1] == "style":
                 # The content of a <style> element is where a background image hides.
@@ -192,6 +214,9 @@ class _Scanner(HTMLParser):
         if self._anchor is not None:
             self._anchor[2].append(data)
         self.scan.events.append(TextEvent(text=data))
+
+    def handle_comment(self, data: str) -> None:
+        self._check()
 
     # -- helpers -----------------------------------------------------------------------
     def _emit_text(self, text: str) -> None:
@@ -234,9 +259,13 @@ class _Scanner(HTMLParser):
                 self.scan.events.append(ResourceEvent(href=href, element="style"))
 
 
-def scan_html(html: str) -> HtmlScan:
-    """Scan once. Never raises: `html.parser` survives what mail carries (F10)."""
-    scanner = _Scanner()
+def scan_html(html: str, should_stop: Callable[[], bool] | None = None) -> HtmlScan:
+    """Scan once. Never raises: `html.parser` survives what mail carries (F10).
+
+    `should_stop` is the deadline. When it says stop, the events end with the last one handed
+    over before it, and `stopped` is set.
+    """
+    scanner = _Scanner(should_stop)
     try:
         scanner.feed(html)
         scanner.close()
