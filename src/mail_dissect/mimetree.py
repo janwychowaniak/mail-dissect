@@ -10,6 +10,7 @@ policies and says nothing (F2).
 
 from __future__ import annotations
 
+import email.errors
 from dataclasses import dataclass, field
 from email.message import Message
 from email.parser import BytesParser
@@ -17,7 +18,7 @@ from io import BytesIO
 
 from . import spans
 from .decode import Hashes, TextResult, decode_text, decode_transfer, hash_bytes
-from .headers import COMPAT32_TEXT, filename_of
+from .headers import COMPAT32_TEXT, STRUCTURED_HEADER_LIMIT, filename_of
 from .sniff import detect_mime
 
 
@@ -111,7 +112,16 @@ def _visit(
         transfer_encoding=(part.get("content-transfer-encoding") or "").strip().lower() or None,
     )
     tree.parts.append(info)
-    if part.defects and not tree.cut:
+    defects = part.defects
+    if _parameters_unread(part, "content-type") or _parameters_unread(part, "content-disposition"):
+        # [D34]: a header past the structured limit was read without its parameters, so its
+        # charset, boundary or name are unknown, which is a cut of ours.
+        tree.flags.add("truncated")
+        if _parameters_unread(part, "content-type"):
+            # With no boundary read, the parser reports a multipart that never segmented.
+            # That describes our limit, not the material, like a missing end after the cut.
+            defects = [d for d in defects if not isinstance(d, _BOUNDARY_UNREAD)]
+    if defects and not tree.cut:
         # The parser's own report of damage. Suppressed when we did the cutting ourselves:
         # a missing end of message then describes our limit, not the material (SPEC §17).
         tree.flags.add("malformed_mime")
@@ -142,6 +152,17 @@ def _visit(
 
     _read_leaf(info, raw[body_start:body_end], tree, max_attachment_bytes)
     _select_body(info, tree)
+
+
+_BOUNDARY_UNREAD = (
+    email.errors.NoBoundaryInMultipartDefect,
+    email.errors.MultipartInvariantViolationDefect,
+)
+
+
+def _parameters_unread(part: Message, header: str) -> bool:
+    value = part.get(header)
+    return value is not None and len(value) > STRUCTURED_HEADER_LIMIT
 
 
 def _is_container(part: Message) -> bool:

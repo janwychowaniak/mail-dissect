@@ -15,13 +15,43 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from email.headerregistry import Address as StdlibAddress
-from email.headerregistry import AddressHeader, HeaderRegistry, UniqueAddressHeader
+from email.headerregistry import (
+    AddressHeader,
+    HeaderRegistry,
+    UniqueAddressHeader,
+    UnstructuredHeader,
+)
 from email.message import Message
 from email.parser import BytesHeaderParser
 from email.policy import Compat32
 from email.utils import collapse_rfc2231_value, decode_params, unquote
+from typing import Any
 
 from .models import substituted
+
+# [D33]: the header parser of the standard library costs about the number of steps of its loop
+# times the length of what is left to read, so a value the sender writes long enough is minutes
+# (F24). Which parser reads a header is the header registry's map, so the limit follows the
+# same map: a structured header (address lists, `Content-Type`, `Date`, ...) is read up to
+# this many characters of its unfolded value, an unstructured one up to the larger.
+STRUCTURED_HEADER_LIMIT = 8_192
+UNSTRUCTURED_HEADER_LIMIT = 65_536
+
+
+class _BoundedMessage(Message):
+    """A message that does not split the parameters of a header longer than the structured
+    limit `[D34]`, and answers as for that header with no parameters.
+
+    `get_param`, `get_boundary` and `get_filename`, the parser's own included, all ask this
+    one method (pinned in `tests/pins.py`). Splitting a header of a million `;` took seven
+    seconds and a boundary search on top of it three more (F25).
+    """
+
+    def _get_params_preserve(self, failobj: Any, header: str) -> Any:
+        value = self.get(header)
+        if value is not None and len(value) > STRUCTURED_HEADER_LIMIT:
+            return [(str(value).split(";", 1)[0].strip(), "")]
+        return super()._get_params_preserve(failobj, header)  # type: ignore[misc]
 
 
 class _Compat32Text(Compat32):
@@ -50,7 +80,7 @@ class _Compat32Text(Compat32):
         return value.replace("\r", "").replace("\n", "")
 
 
-COMPAT32_TEXT = _Compat32Text()
+COMPAT32_TEXT = _Compat32Text(message_factory=_BoundedMessage)
 
 ADDRESS_HEADERS = (
     "from",
@@ -77,6 +107,18 @@ _registry.map_to_type("return-path", UniqueAddressHeader)  # type: ignore[arg-ty
 _registry.map_to_type("resent-reply-to", AddressHeader)  # type: ignore[arg-type]
 
 
+def header_limit(name: str) -> int:
+    """How many characters of this header's unfolded value are read `[D33]`."""
+    kind = _registry.registry.get(name.lower(), _registry.default_class)
+    if issubclass(kind, UnstructuredHeader):
+        return UNSTRUCTURED_HEADER_LIMIT
+    return STRUCTURED_HEADER_LIMIT
+
+
+def over_limit(name: str, value: str) -> bool:
+    return len(value) > header_limit(name)
+
+
 def decode_value(name: str, value: str) -> str:
     """Decode one header value (RFC 2047 included). Never raises on hostile input."""
     try:
@@ -89,21 +131,38 @@ def decode_value(name: str, value: str) -> str:
 _ENCODED_WORD = re.compile(r"=\?([^?*\s]+)(?:\*[^?\s]*)?\?[QqBb]\?[^?\s]*\?=")
 
 
-def header_map(raw: bytes) -> tuple[dict[str, list[str]], bool]:
+@dataclass(slots=True)
+class HeaderBlock:
+    """Every header of one block, and what reading them reported."""
+
+    headers: dict[str, list[str]]
+    # Reading a value fell back (`encoding_fallback`, SPEC §5.1).
+    fell_back: bool = False
+    # A value past its limit, or past the deadline, was kept as written (`truncated`).
+    cut: bool = False
+
+
+def header_map(raw: bytes, should_stop: Callable[[], bool] | None = None) -> HeaderBlock:
     """Every header, names lowercased, values in order of appearance (SPEC §7).
 
     No selection: `headers` returns all of them, because choosing which matter is the
-    consumer's business. The second value says whether reading any of them fell back, which
-    is `encoding_fallback` (SPEC §5.1).
+    consumer's business. A value longer than its limit `[D33]`, and every value once the
+    deadline has passed `[D10]`, is kept as it was written, unfolded and not decoded: no header
+    is lost, and the scan still reads it.
     """
     message = BytesHeaderParser(policy=COMPAT32_TEXT).parsebytes(raw)
-    result: dict[str, list[str]] = {}
-    fell_back = False
+    block = HeaderBlock(headers={})
+    stopped = False
     for name, value in message.items():
-        decoded, this_fell_back = _read(name, value)
-        fell_back = fell_back or this_fell_back
-        result.setdefault(name.lower(), []).append(decoded)
-    return result, fell_back
+        stopped = stopped or (should_stop is not None and should_stop())
+        if stopped or over_limit(name, value):
+            block.cut = True
+            decoded = value
+        else:
+            decoded, fell_back = _read(name, value)
+            block.fell_back = block.fell_back or fell_back
+        block.headers.setdefault(name.lower(), []).append(decoded)
+    return block
 
 
 def _read(name: str, value: str) -> tuple[str, bool]:
@@ -144,6 +203,11 @@ def filename_of(part: Message) -> tuple[str | None, bool]:
     when it serves the name (SPEC §13.3).
     """
     for header, param in (("content-disposition", "filename"), ("content-type", "name")):
+        value = part.get(header)
+        if value is not None and len(value) > STRUCTURED_HEADER_LIMIT:
+            # [D34]: its parameters are not read, and `name` in `Content-Type` is not read in
+            # its place, since `filename` may well have been written here.
+            return None, False
         plain, extended = _written_name(part, header, param)
         if isinstance(extended, tuple):
             # A charset was declared. The standard library reads one it cannot look up as some
@@ -278,17 +342,28 @@ _AUTH_METHOD = re.compile(r"^\s*([A-Za-z0-9_.-]+)\s*=\s*([A-Za-z0-9_-]+)")
 _AUTH_PARAM = re.compile(r"(?<![A-Za-z0-9_.-])([A-Za-z0-9_.-]+)\s*=\s*(\"[^\"]*\"|[^\s;]+)")
 
 
-def addresses_of(raw: bytes) -> dict[str, list[Address]]:
-    """Decompose EVERY address header present, in full (SPEC §7).
+def addresses_of(
+    raw: bytes, should_stop: Callable[[], bool] | None = None
+) -> tuple[dict[str, list[Address]], bool]:
+    """Decompose EVERY address header present, in full (SPEC §7), and say whether one was
+    left undecomposed because of its length or the deadline.
 
     Not a chosen three: decomposing one costs the same as decomposing all of them, and
-    choosing would be a decision about which headers matter.
+    choosing would be a decision about which headers matter. A header past its limit `[D33]`,
+    or past the deadline, gives one entry with nulls, as a header nothing could be read from.
     """
     message = BytesHeaderParser(policy=COMPAT32_TEXT).parsebytes(raw)
     result: dict[str, list[Address]] = {}
+    cut = False
+    stopped = False
     for name, value in message.items():
         lowered = name.lower()
         if lowered not in ADDRESS_HEADERS:
+            continue
+        stopped = stopped or (should_stop is not None and should_stop())
+        if stopped or over_limit(lowered, value):
+            cut = True
+            result.setdefault(lowered, []).append(Address(None, None, None, None))
             continue
         parsed: list[Address] = []
         try:
@@ -313,7 +388,7 @@ def addresses_of(raw: bytes) -> dict[str, list[Address]]:
             # would be: the raw value stays in `headers` either way.
             parsed.append(Address(None, None, None, None))
         result.setdefault(lowered, []).extend(parsed)
-    return result
+    return result, cut
 
 
 def _written_inside(name: str, local_part: str) -> StdlibAddress | None:

@@ -176,8 +176,9 @@ worth more than the list:
   that goes red puts both runs in one chunk.
 - **A verdict read where the term being looked for is still hidden under another.** A screen
   for quadratic cost passed the unstructured header parser on `a ` — a letter and a space,
-  repeated — because it asked for two consecutive doublings above 2.8, and at 32k characters
-  the parser's linear cost per step still dominated: ×2.05 there, ×3.5 from 128k to 256k.
+  repeated — because it asked for two consecutive doublings above 2.8, and below 64k characters
+  the parser's cost per step still dominated: ×2.8 and ×2.7 there, ×3.2 and ×3.5 from 64k to
+  256k (F24).
   "Linear" was read off sizes where the quadratic term was too small to see, and a mechanism
   was proposed on the strength of it. A verdict of linear is read from the last doubling, best
   of two, at sizes where the linear term no longer dominates; and a parser that splits on white
@@ -354,6 +355,14 @@ The full record is `docs/SPEC.md` §22. The ones most likely to be "improved" by
   parser's view `[D24]`: making it agree with the name is the same regression as restoring a
   value as written.
 - **[D15]** HTML is parsed with the standard library; do not reach for `lxml` for "robustness".
+- **[D33]** a header past its limit is kept as written, not decoded "as far as it goes": the
+  limit is a length because the parser's cost is its steps times what is left, and the steps
+  move with the interpreter (F24). Decoding the start of a long value returns a value the
+  header does not hold, and raising the limit "to be safe" puts back the minutes.
+- **[D34]** the bound on a part's parameters lives in `Message._get_params_preserve`, a private
+  method every reader asks, and `tests/pins.py` pins that they still do. Reading "just the
+  charset" out of a long header with a pattern of our own is a parser in front of the parser,
+  the mistake `[D27]` already names.
 - **[D20]**, SPEC §5.1: `encoding_fallback` fires when, and only when, a declared charset was
   not taken or something was substituted. A scrub that loses nothing — raw UTF-8 in an address
   — is not reported. Flagging every scrub looks like diligence and is the same mistake as `[D23]`:

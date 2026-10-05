@@ -433,6 +433,40 @@ def check_registry_map() -> None:
     assert unstructured == UNSTRUCTURED, unstructured
 
 
+def check_parameter_funnel() -> None:
+    """`[D34]`: the bound on a part's parameters is one private method of `Message`.
+
+    `get_param`, `get_boundary` and `get_filename` all ask `_get_params_preserve` for the
+    parameters, and the service bounds that method. A Python whose readers no longer ask it
+    would read every parameter of a header of any length again, so this must turn red there.
+    The control is the same headers under the limit, whose parameters are read.
+    """
+    from email.parser import BytesParser
+
+    from mail_dissect.headers import COMPAT32_TEXT, STRUCTURED_HEADER_LIMIT
+
+    def parsed(length: int) -> Any:
+        filler = "; x=y" * (length // 5)
+        raw = (
+            f'Content-Type: text/plain; charset=utf-8; boundary="BB"{filler}\r\n'
+            f'Content-Disposition: attachment; filename="a.pdf"{filler}\r\n\r\nbody'
+        ).encode()
+        return BytesParser(policy=COMPAT32_TEXT).parsebytes(raw)
+
+    short, long = parsed(1_000), parsed(STRUCTURED_HEADER_LIMIT)
+    assert len(long["content-type"]) > STRUCTURED_HEADER_LIMIT > len(short["content-type"])
+    assert (short.get_param("charset"), short.get_boundary(), short.get_filename()) == (
+        "utf-8",
+        "BB",
+        "a.pdf",
+    )
+    assert (long.get_param("charset"), long.get_boundary(), long.get_filename()) == (
+        None,
+        None,
+        None,
+    )
+
+
 def check_values(case: Folded, dissect: Dissect) -> None:
     """The folded message yields the values its headers hold, not the lines they were on."""
     message = dissect(case.raw)["messages"][case.message]
@@ -494,7 +528,10 @@ def main() -> int:
                 body: dict[str, Any] = response.json()
                 return body
 
-            checks: list[tuple[str, Callable[[], None]]] = [("registry map", check_registry_map)]
+            checks: list[tuple[str, Callable[[], None]]] = [
+                ("registry map", check_registry_map),
+                ("parameter funnel", check_parameter_funnel),
+            ]
             for case in FOLDED:
                 checks.append((f"values {case.file}", lambda c=case: check_values(c, dissect)))
                 checks.append((f"twin   {case.file}", lambda c=case: check_twin(c, dissect)))

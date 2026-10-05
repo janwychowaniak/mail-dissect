@@ -44,15 +44,27 @@ class Dissection:
 
 
 def parse_message(
-    raw: bytes, index: int, depth: int, *, max_attachment_bytes: int, max_parts: int
+    raw: bytes,
+    index: int,
+    depth: int,
+    *,
+    max_attachment_bytes: int,
+    max_parts: int,
+    should_stop: Callable[[], bool] | None = None,
 ) -> ParsedMessage:
-    """Dissect one message. The top-level message is dissected exactly like a nested one."""
+    """Dissect one message. The top-level message is dissected exactly like a nested one.
+
+    `should_stop` is the deadline, asked between headers `[D10]`.
+    """
     parsed = ParsedMessage(index=index, depth=depth, raw=raw)
     header_block = _header_block(raw)
-    parsed.headers, substituted = header_map(header_block)
-    if substituted:
+    block = header_map(header_block, should_stop)
+    parsed.headers = block.headers
+    if block.fell_back:
         parsed.flags.add("encoding_fallback")
-    parsed.addresses = addresses_of(header_block)
+    parsed.addresses, addresses_cut = addresses_of(header_block, should_stop)
+    if block.cut or addresses_cut:
+        parsed.flags.add("truncated")
     parsed.received = [parse_received(value) for value in parsed.headers.get("received", [])]
     for value in parsed.headers.get("authentication-results", []):
         parsed.auth.extend(parse_auth_results(value))
@@ -94,6 +106,7 @@ def dissect_messages(
             depth=depth,
             max_attachment_bytes=max_attachment_bytes,
             max_parts=remaining,
+            should_stop=should_stop,
         )
         result.messages.append(message)
         result.flags |= message.tree.flags | message.flags

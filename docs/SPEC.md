@@ -345,6 +345,25 @@ interpreter the image ships (F18).
 RFC 2047 decoding goes through the standard library's `HeaderRegistry`, never through
 `make_header(decode_header(...))`, which raises on input a hostile sender fully controls (F7).
 
+**A value is read up to a length set by the class of the header** `[D33]`: up to
+`STRUCTURED_HEADER_LIMIT` = 8,192 characters of the unfolded value for a structured header, and
+`UNSTRUCTURED_HEADER_LIMIT` = 65,536 for an unstructured one — `subject`, and every name the
+parser has no grammar for. A value past its limit is kept in `headers` as written, unfolded and
+not decoded; an address header past it gives one entry of `addresses` with every field `null`;
+and the response gets `truncated`. The value is still scanned for candidates (§11), so nothing
+in it escapes the list. Once the deadline has passed, every header not yet read is kept in the
+same shape (§15), so `headers` never loses one.
+
+**A part's parameters are read only from a header within the structured limit** `[D34]`. A
+`Content-Type` or `Content-Disposition` longer than 8,192 characters gives its type or
+disposition, which stand before the first `;`, and no parameter: a charset that is not read
+leaves the text undeclared, with no `encoding_fallback`, since no declaration was read and then
+not taken (§5.1); a name that is not read is `null`, and `name` in `Content-Type` is not read in
+its place, since `filename` may have been written in the header that was not; and a multipart
+whose boundary is not read is a leaf, by the rule of §6.1. The response gets `truncated`, and
+what the parser reports about a multipart that never segmented describes this limit, not the
+material, so it is no `malformed_mime`.
+
 ### 7.1 Declared versus detected
 
 An attachment carries `declared_mime` (what the message says) next to `detected_mime` (what the
@@ -935,6 +954,11 @@ reads: a header value, a text body, a run of text in HTML, a document's text. An
 from an attribute (`href`, `src`) is not read by the grammar and is not limited. RFC 9110 §4.1
 recommends that a URI of at least 8,000 octets be supported; the limit is about 32 times that.
 
+**A header is read up to `STRUCTURED_HEADER_LIMIT` = 8,192 or `UNSTRUCTURED_HEADER_LIMIT` =
+65,536 characters**, by the class of its parser, and **a part's parameters only from a header
+within the first** — `[D33]`, `[D34]`, and §7 says what a header past its limit gives. Both are
+lengths of what the sender wrote, so `truncated` from them depends only on the material.
+
 **There is deliberately no limit on the sum of attachments:** the sum of decoded bytes cannot
 exceed the input size, because transfer encoding only inflates — and the service does not
 expand archives, so there is no path such a limit would protect. A parameter that never fires
@@ -960,8 +984,9 @@ anything.
 
 **The whole budget is enforced at work-unit boundaries** — a message, an attachment, a single
 dependency call — and not in the middle of parsing: the service checks the deadline between
-units and stops before the next one, returning what it has computed `[D10]`. A message parsed in
-time is returned whole. Its scan asks the deadline as it goes: before every chunk of text, each
+units and stops before the next one, returning what it has computed `[D10]`. The headers of a
+message are units too: once the deadline has passed, every header not yet read is kept as
+written (§7). A message parsed in time is returned whole. Its scan asks the deadline as it goes: before every chunk of text, each
 cut just before white space, and before everything the HTML parser hands over. Once the
 deadline has passed, the scan adds nothing more. A message reached late has no candidates, one
 overtaken keeps what was found before, and its `links[]`, `resources[]` and `text_from_html`
@@ -1284,6 +1309,28 @@ Approved by the maintainer, 2026-09-17.
   is:** `**http://a.example.net/x**` keeps `**` at the end of its path, where `*` is legal, and
   trimming it would change URLs that end in one; `http://**a.example.net`, with no host after
   `//`, is read from its first `/` as before, and gives no `domain`.
+
+- **[D33] A header is read up to a length set by the class of its parser** (§7): 8,192
+  characters of the unfolded value for a structured header, 65,536 for an unstructured one.
+  Decided 2026-10-05, for 0.7.0. The standard library's header parser costs about the number of
+  steps of its loop times the length of what is left to read, so one `Cc` of 40,000 periods took
+  minutes and a `Subject` of a letter and a space five seconds at 256k (F24). A limit had to be
+  a length: the steps and their cost are properties of the interpreter, and one shape moved by
+  five times between two patch releases, while a length is a property of the input that a
+  consumer can test with a pair of values one character apart; a count of encoded-words bounds
+  nothing, since the costliest shape has none. Which parser reads a header is the interpreter's
+  header registry map, pinned in `tests/pins.py`, so the class follows the image's interpreter.
+  Each limit puts the worst shape measured at about a second. Splitting an address list before
+  the parser sees it was rejected: it would be a parser in front of the parser (`[D27]`). Past
+  the limit the value is kept as written and still scanned, so the list of candidates loses
+  nothing, and only its decoded view and its decomposition are missing.
+- **[D34] A part's parameters are read only from a header within the structured limit**
+  (§7). Decided 2026-10-05, for 0.7.0. Splitting a header into its parameters takes seven
+  microseconds a parameter, and a parameter is one character, so a million `;` took seconds,
+  and the parser's own search for a boundary as many again (F25). Every reader of parameters,
+  the parser's included, asks one private method of `email.message.Message`, and the service's
+  messages bound that method: past the limit it answers as for a header with no parameters. A
+  test in `tests/pins.py` would turn red on a Python whose readers stopped asking it.
 
 **Implementation**
 

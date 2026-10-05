@@ -172,3 +172,36 @@ def test_long_tails_of_commas_are_trimmed_in_linear_time(client: TestClient) -> 
     first = body["messages"][0]["observables"][0]
     assert (first["value"], first["occurrences"]) == (f"{URL},y", 8)
     assert elapsed < THRESHOLD, f"took {elapsed:.1f}s"
+
+
+def test_a_structured_header_past_its_limit_is_not_parsed(client: TestClient) -> None:
+    """F24: the header parser costs its steps times what is left to read. One `Cc` of 40,000
+    periods took minutes, and a `Content-Type` of 8,000 `(a)` sixteen seconds; past the
+    structured limit neither is parsed `[D33]`, and their bodies are still read."""
+    raw = b.message(
+        # A `Content-Type` with no type in it is `text/plain` to the parser, so the body is
+        # still the text body, read after the header that is not.
+        {"Cc": "." * 40_000, "Content-Type": "(a)" * 8_000},
+        body=b"body mentions body.example.net",
+    )
+
+    body, elapsed = _timed(client, raw)
+
+    assert "body.example.net" in [o["value"] for o in body["messages"][0]["observables"]]
+    assert elapsed < THRESHOLD, f"took {elapsed:.1f}s"
+
+
+def test_a_million_parameters_are_not_split(client: TestClient) -> None:
+    """F25: splitting a part header's parameters costs seven microseconds each, so a million
+    `;` took seven seconds, and a boundary search over them three more. Past the structured
+    limit they are not split `[D34]`."""
+    raw = b.message(
+        {"Content-Type": "multipart/mixed" + ";" * 1_000_000}, body=b"--x\r\n\r\npart\r\n--x--\r\n"
+    )
+
+    body, elapsed = _timed(client, raw)
+
+    assert [part["content_type"] for part in body["messages"][0]["mime_parts"]] == [
+        "multipart/mixed"
+    ]
+    assert elapsed < THRESHOLD, f"took {elapsed:.1f}s"

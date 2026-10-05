@@ -2,8 +2,8 @@
 
 Run:  python3.13 docs/research/probes/email_stdlib.py
 
-Findings F1 to F10, F17 to F19, F21 and F23 in ../NOTES.md are produced by one function each
-here.
+Findings F1 to F10, F17 to F19, F21 and F23 to F25 in ../NOTES.md are produced by one function
+each here.
 The probes are read-only, offline, and depend on nothing but the standard library, so
 anyone can re-run them against a newer interpreter and see whether a finding still
 holds. Print output is the evidence; keep it terse enough to paste.
@@ -11,8 +11,10 @@ holds. Print output is the evidence; keep it terse enough to paste.
 
 from __future__ import annotations
 
+import contextlib
 import email
 import email.policy
+import itertools
 import random
 import sys
 import time
@@ -551,6 +553,100 @@ def f23_html_parser_fed_in_pieces() -> None:
         )
 
 
+def f24_the_header_parser_cost() -> None:
+    """What does the header registry cost on a long value, and what makes it grow?"""
+    _banner("F24", "the header parser's cost")
+    registry = HeaderRegistry()
+
+    def cost(name: str, value: str) -> float:
+        start = time.perf_counter()
+        with contextlib.suppress(Exception):
+            str(registry(name, value))
+        return time.perf_counter() - start
+
+    unstructured = {
+        "one token": "a",
+        "a 7-letter word and a space": "abcdefg ",
+        "a letter and a space": "a ",
+        "=?a and a space (no encoded-word)": "=?a ",
+        "=?utf-8?q?a?= and a space": "=?utf-8?q?a?= ",
+    }
+    for label, unit in unstructured.items():
+        cells = []
+        for size in (16_000, 32_000, 64_000):
+            value = (unit * (size // len(unit) + 1))[:size]
+            cells.append(f"{size // 1000}k {cost('subject', value):.3f}s")
+        print(f"  Subject, {label:36} " + "  ".join(cells))
+    # The same shape over a wider range, best of two: where the per-step cost still dominates,
+    # twice the input reads about twice the time, and the square shows only further up.
+    sizes = (16_000, 32_000, 64_000, 128_000, 256_000)
+    times = [min(cost("subject", ("a " * size)[:size]) for _ in range(2)) for size in sizes]
+    ratios = "  ".join(f"x{b / a:.2f}" for a, b in itertools.pairwise(times))
+    print(f"  Subject, a letter and a space, 16k to 256k: {times[-1]:.2f}s at 256k; {ratios}")
+    structured = [
+        ("content-type", "(a)"),
+        ("content-type", "text/plain;"),
+        ("cc", "."),
+        ("references", ","),
+        ("to", '"'),
+        ("message-id", "(a)"),
+        ("date", "(a)"),
+    ]
+    for name, unit in structured:
+        cells = []
+        for size in (2_000, 4_000, 8_000):
+            value = (
+                unit[:-1] + (unit[-1] * size) if unit.endswith(";") else unit * (size // len(unit))
+            )
+            cells.append(f"{size // 1000}k {cost(name, value[:size]):.2f}s")
+        label = f"{name}, {unit!r} repeated"
+        print(f"  {label:45} " + "  ".join(cells))
+
+
+def f25_part_parameters() -> None:
+    """What does reading a part header's parameters cost, and which method do all readers ask?"""
+    _banner("F25", "a part header's parameters")
+    from email.message import Message
+
+    for count in (250_000, 500_000, 1_000_000):
+        raw = b"Content-Type: text/plain" + b";" * count + b"\r\n\r\nx"
+        part = message_from_bytes(raw, policy=email.policy.compat32)
+        start = time.perf_counter()
+        part.get_param("charset")
+        read = time.perf_counter() - start
+        start = time.perf_counter()
+        message_from_bytes(
+            raw.replace(b"text/plain", b"multipart/mixed"), policy=email.policy.compat32
+        )
+        parsed = time.perf_counter() - start
+        print(f"  {count:>9} ';'  get_param {read:.2f}s   parsing it as multipart {parsed:.2f}s")
+
+    class Counting(Message):
+        asked = 0
+
+        def _get_params_preserve(self, failobj, header):  # type: ignore[no-untyped-def]
+            Counting.asked += 1
+            return super()._get_params_preserve(failobj, header)
+
+    raw = (
+        b"Content-Type: text/plain; charset=utf-8\r\n"
+        b'Content-Disposition: attachment; filename="a.pdf"\r\n\r\nx'
+    )
+    policy = email.policy.compat32.clone(message_factory=Counting)
+    part = message_from_bytes(raw, policy=policy)
+    for reader in (
+        "get_param",
+        "get_params",
+        "get_boundary",
+        "get_filename",
+        "get_content_charset",
+    ):
+        before = Counting.asked
+        method = getattr(part, reader)
+        method("charset") if reader == "get_param" else method()
+        print(f"  {reader:20} asks _get_params_preserve {Counting.asked - before} time(s)")
+
+
 def main() -> int:
     print(f"python {sys.version}")
     f1_nested_reserialisation_is_not_byte_identical()
@@ -568,6 +664,8 @@ def main() -> int:
     f19_an_address_written_inside_quotes()
     f21_a_filename_read_by_three_grammars()
     f23_html_parser_fed_in_pieces()
+    f24_the_header_parser_cost()
+    f25_part_parameters()
     return 0
 
 

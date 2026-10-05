@@ -9,8 +9,9 @@ against the versions in `uv.lock`; F20 on **2026-10-01** with
 was run inside the published 0.4.0 image and on the tree that became 0.5.0; F21 on
 **2026-10-03** with `probes/email_stdlib.py`, on 3.13.12 and on 3.13.15 inside the published
 0.5.0 image; F22 on **2026-10-05** with [`probes/grammar.py`](probes/grammar.py), on 3.13.12
-against the tree of `v0.6.0`; F23 on **2026-10-05** with `probes/email_stdlib.py`, on 3.13.12
-and on 3.13.16 inside the published 0.6.0 image. Each of them is printed by one function in its script; re-run the script against a
+against the tree of `v0.6.0`; F23 on **2026-10-05** and F24 and F25 on **2026-10-06** with
+`probes/email_stdlib.py`, on 3.13.12 and on 3.13.16 inside the published 0.6.0 image. Each of
+them is printed by one function in its script; re-run the script against a
 newer interpreter, dependency or release to see whether a finding still holds. The scripts are
 offline and read-only. F13 to F16 each say how they were measured.
 
@@ -70,6 +71,14 @@ number, as F15 was.
   Separately, about one unit in ten, repeated into a run with no white space, makes the
   grammar's cost grow faster than linearly. `probes/grammar.py` also holds the comparison every
   change to the grammar in 0.7.0 is held to: zero differences, or each one recorded. (F22)
+- The header registry costs about the steps of its loop times what is left to read: a letter
+  and a space, repeated, is about five seconds at 256k characters, and a structured header of
+  `(a)` over a second at 8k. The `"` shape in an address header moved by five times between
+  3.13.12 and 3.13.16. Hence a limit on the length of a header, by the class of its parser
+  `[D33]`, rather than on a count or a time. (F24)
+- Every reader of a part header's parameters asks one private method, and splitting a header
+  of a million `;` takes seconds, its boundary search as many again. Hence the bound in that
+  method `[D34]`. (F25)
 - `html.parser` fed in pieces reads a document the way it reads it fed at once only where the
   interpreter decides the end of an empty comment without looking ahead: 3.13.16 does, 3.13.12
   does not. The parse of `<!-->` itself moved between the two. Hence the HTML scan is fed once
@@ -897,3 +906,74 @@ grammar reads white space and the end of a chunk alike.
 `test_observables::test_a_text_scanned_in_chunks_gives_what_one_scan_gives` compares the two on
 generated texts. The same comparison on 4 000 texts, run with the branch's source inside the
 0.6.0 image, gave no difference on 3.13.16 either.
+
+---
+
+## F24 — the header parser costs its steps times what is left to read
+
+Probed with `f24_the_header_parser_cost` in `probes/email_stdlib.py` on 3.13.12 and on 3.13.16
+inside the published 0.6.0 image, one try each unless stated.
+
+The header registry reads an unstructured value in a loop, and every step — a run of white
+space, a word, an attempt at an encoded-word — copies what is left of the value. So the cost is
+about the number of steps times the length: a value with no white space is one step however
+long it is, and a letter and a space is a step every character.
+
+| `Subject`, repeated | 64k, 3.13.12 | 64k, 3.13.16 |
+| --- | --- | --- |
+| one token (`a`) | 0.002 s | 0.003 s |
+| a 7-letter word and a space | 0.10 s | 0.16 s |
+| a letter and a space | 0.42–0.44 s | 0.61 s |
+| `=?a` and a space, no encoded-word in it | 1.05 s | 0.92 s |
+| `=?utf-8?q?a?=` and a space | 0.22 s | 0.28 s |
+
+**The square shows only further up.** A letter and a space from 16k to 256k characters, best of
+two: ×2.82, ×2.69, ×3.22, ×3.51 on 3.13.12, 4.75 s at 256k; ×2.50, ×2.83, ×3.09, ×3.34 on
+3.13.16, 6.01 s. Below 64k each doubling reads under three, because the cost of a step is still
+most of the cost; a screen that asks for two doublings above 2.8 there reads it as linear.
+
+A structured header has a parser of its own for each grammar, and each grows by about four for
+twice the input, at 8k characters:
+
+| Header, repeated | 3.13.12 | 3.13.16 |
+| --- | --- | --- |
+| `Content-Type`, `(a)` | 1.31–1.37 s | 1.19 s |
+| `Content-Type`, `text/plain` and `;` | 0.52–0.57 s | 0.86 s |
+| `Cc`, `.` | 0.99–1.05 s | 1.02 s |
+| `References`, `,` | 0.48 s | 0.53 s |
+| `To`, `"` | 1.79–1.87 s | 0.38 s |
+| `Message-ID`, `(a)` | 0.31–0.32 s | 0.29 s |
+| `Date`, `(a)` | 0.00 s | 0.00 s |
+
+**The interpreter moved one of them**: `"` in an address header is about five times faster on
+3.13.16 than on 3.13.12; which patch release changed it was not measured. So the steps of the
+loop, and the time they take, are properties of the interpreter under the image's tag, and a
+limit written as a count of them, or as a time, would move with it. The length of a value is a
+property of the input, the same on every interpreter, and a consumer can test it with a pair of
+inputs one character apart. Counting encoded-words does not bound the cost either: the
+unstructured shape that costs most has none. Hence `[D33]`: a header is read up to a length set
+by the class of its parser, 8,192 characters for a structured one, where the worst shape costs
+about a second, and 65,536 for an unstructured one, where it costs about the same.
+
+---
+
+## F25 — a part header's parameters, and the one method every reader asks
+
+Probed with `f25_part_parameters` in `probes/email_stdlib.py` on 3.13.12 and on 3.13.16 inside
+the published 0.6.0 image.
+
+Splitting a header into its parameters is linear, but a parameter is written with one
+character, so a sender sets the count:
+
+| `;` after `text/plain` | `get_param`, 3.13.12 | parsing it as `multipart/mixed`, 3.13.12 | both, 3.13.16 |
+| --- | --- | --- | --- |
+| 250,000 | 0.66 s | 0.66 s | 0.92 s / 0.86 s |
+| 500,000 | 1.34 s | 1.42 s | 1.86 s / 1.80 s |
+| 1,000,000 | 2.70 s | 2.71 s | 3.73 s / 4.05 s |
+
+Parsing a multipart costs the same again because the parser asks for its boundary, and the
+service asks for the charset and the name on top. `get_param`, `get_params`, `get_boundary`,
+`get_filename` and `get_content_charset` each ask `Message._get_params_preserve` exactly once
+on both interpreters, a subclass counting the calls. So a bound in that one private method
+bounds every reader, the parser's own included. Hence `[D34]`, and the pin in `tests/pins.py`
+that would turn red on a Python whose readers stopped asking it.
