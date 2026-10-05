@@ -145,3 +145,30 @@ def test_one_value_in_many_places_is_counted_in_linear_time() -> None:
     (candidate,) = collector.finish()
     assert candidate.occurrences == 30_000 and len(candidate.sources) == 30_000
     assert elapsed < THRESHOLD, f"took {elapsed:.1f}s"
+
+
+def test_a_long_tail_of_parentheses_is_trimmed_in_linear_time(client: TestClient) -> None:
+    """A `)` may stand in a path since `[D31]`, so a tail of them is now part of the match and
+    is trimmed off, as a tail of `}` was. The head `(y)` is the control: it shows the tail went
+    through the grammar and the trimming, since 0.6.0 returned `…/x(y` and a fast answer that
+    cut the URL short would prove nothing."""
+    raw = b.message({"Subject": "s"}, body=f"see {URL}(y){')' * 200_000} now".encode())
+
+    body, elapsed = _timed(client, raw)
+
+    assert body["messages"][0]["observables"][0]["value"] == f"{URL}(y)"
+    assert elapsed < THRESHOLD, f"took {elapsed:.1f}s"
+
+
+def test_long_tails_of_commas_are_trimmed_in_linear_time(client: TestClient) -> None:
+    """A comma may stand in a path since `[D31]`; its tail is cheap to cut, like a period's, so
+    eight of them as long as a run may be. The head `,y` is the control, as `(y)` is above."""
+    tail = "," * (250_000 - len(URL) - 2)
+    text = " ".join(f"{URL},y{tail}" for _ in range(8))
+    raw = b.message({"Subject": "s"}, body=text.encode())
+
+    body, elapsed = _timed(client, raw)
+
+    first = body["messages"][0]["observables"][0]
+    assert (first["value"], first["occurrences"]) == (f"{URL},y", 8)
+    assert elapsed < THRESHOLD, f"took {elapsed:.1f}s"

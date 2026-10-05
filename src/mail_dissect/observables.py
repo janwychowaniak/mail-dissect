@@ -50,10 +50,23 @@ _SAFE_CHARS = r"[A-Za-z0-9@:._/-]"
 _TOKEN_CHARS = r"[A-Za-z0-9\[\](){}@:._/-]"
 _LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
 _HOST = rf"(?:{_LABEL}\.)+{_LABEL}"
-_URL_TAIL = r"[^\s<>\"'\]\),]*"
+# [D31] A URL has two grammars, as RFC 3986 has: one for the authority and one for the path,
+# query and fragment. A `,` or a `)` may stand in the path, query or fragment of a URL with an
+# authority, and ends any other part; a comma directly before another `scheme://` ends the URL.
+# `[` and `]` end a URL anywhere but in an IP-literal host directly after `//`.
+_URL_PCHAR = r"(?:[^\s<>\"'\[\],]|,(?![A-Za-z][A-Za-z0-9+.-]*://))"
+_URL_PATH = rf"(?:[/?#]{_URL_PCHAR}*)?"
+# [D32] In text, a URL's host is labels or an IP literal, not RFC 3986's reg-name, so that
+# markup glued to a host (`**…**`, `|…|`) does not become part of it. `%` is in a label so that
+# a percent-encoded host is not cut in half; it gives no `domain` [D30].
+_URL_HOSTLABEL = r"[\w%-]+"
+_URL_HOSTPART = rf"(?:\[[0-9A-Fa-f:.]+\]|{_URL_HOSTLABEL}(?:\.{_URL_HOSTLABEL})*\.?)"
+_URL_AUTH = rf"(?:[^\s<>\"'\[\]\),@/?#]*@)?{_URL_HOSTPART}(?::\d*)?"
+# A URL with no authority (`mailto:`, `sip:`, `data:`) holds none of `[ ] ) ,`.
+_URL_OPAQUE = r"[^\s<>\"'\[\]\),]*"
 # Excludes `@` and `/` so the opaque-scheme branch has exactly one way to match:
 # `tail [@/] tail` with the same class on both sides backtracks quadratically.
-_URL_HEAD = r"[^\s<>\"'\]\),@/]*"
+_URL_HEAD = r"[^\s<>\"'\[\]\),@/]*"
 _LOCAL_PART = r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*"
 
 # The order of these alternatives IS the contract for resolving overlaps (SPEC §11.2): the
@@ -63,14 +76,15 @@ _LOCAL_PART = r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~
 #    `mailto:a@example.com` from the `Note:this` in a sentence - a structural test, not a list
 #    of schemes we happen to like.
 _URL_SCHEME = (
-    rf"(?P<url_scheme>\b[A-Za-z][A-Za-z0-9+.-]*:(?://{_URL_TAIL}|{_URL_HEAD}[@/]{_URL_TAIL}))"
+    rf"(?P<url_scheme>\b[A-Za-z][A-Za-z0-9+.-]*:"
+    rf"(?://{_URL_AUTH}{_URL_PATH}|{_URL_HEAD}[@/]{_URL_OPAQUE}))"
 )
 # 3. An address.
 _EMAIL = rf"(?P<email>\b{_LOCAL_PART}@{_HOST})"
 _OTHERS = "|".join(
     (
         # 4. A URL without a scheme: shorteners and `www.` are everyday mail content.
-        rf"(?P<url_bare>\b(?:www\.{_HOST}{_URL_TAIL}|{_HOST}/{_URL_TAIL}))",
+        rf"(?P<url_bare>\b(?:www\.{_HOST}(?::\d*)?{_URL_PATH}|{_HOST}/{_URL_PCHAR}*))",
         # 5/6. Loose shapes, validated by a real address parser rather than by the regex.
         r"(?P<ipv6>(?<![:.\w])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f:.]{0,45})",
         #    [D26]: a label character (`\w`: a letter, a digit or an underscore, in any
@@ -430,8 +444,14 @@ _LOCAL_REVERSED = re.compile(_LOCAL_PART)  # a dot-atom reads the same backwards
 _LOCAL_CHARS = frozenset(string.ascii_letters + string.digits + "!#$%&'*+/=?^_`{|}~-")
 _LETTERS = frozenset(string.ascii_letters)
 _BOUNDARY = re.compile(r"\b")
-_TAIL_STOP = re.compile(r"[\s<>\"'\]\),]")
-_HEAD_STOP = re.compile(r"[\s<>\"'\]\),@/]")
+_HEAD_STOP = re.compile(r"[\s<>\"'\[\]\),@/]")
+_OPAQUE_STOP = re.compile(r"[\s<>\"'\[\]\),]")
+_USERINFO_STOP = re.compile(r"[\s<>\"'\[\]\),@/?#]")
+# The path ends at a character it cannot hold, or at a comma directly before another
+# `scheme://`. Each comma's look ahead stops at the next comma, so one search is linear.
+_PATH_END = re.compile(r"[\s<>\"'\[\]]|,(?=[A-Za-z][A-Za-z0-9+.-]*://)")
+_URL_HOST_AT = re.compile(_URL_HOSTPART)
+_PORT_AT = re.compile(r"(?::\d*)?")
 _HOST_AT = re.compile(_HOST)
 
 
@@ -458,13 +478,15 @@ class _Stop:
 class _Context:
     """What the readers of both anchors share, made when one of them first needs it."""
 
-    __slots__ = ("_reversed", "head_stop", "tail_stop", "text")
+    __slots__ = ("_reversed", "head_stop", "opaque_stop", "path_stop", "text", "userinfo_stop")
 
     def __init__(self, text: str) -> None:
         self.text = text
         self._reversed: str | None = None
-        self.tail_stop = _Stop(text, _TAIL_STOP)
         self.head_stop = _Stop(text, _HEAD_STOP)
+        self.opaque_stop = _Stop(text, _OPAQUE_STOP)
+        self.userinfo_stop = _Stop(text, _USERINFO_STOP)
+        self.path_stop = _Stop(text, _PATH_END)
 
     def stretch(self, pattern: re.Pattern[str], anchor: int) -> int:
         """Where the longest stretch `pattern` matches, ending just before `anchor`, begins."""
@@ -523,13 +545,43 @@ def _scheme_at(context: _Context, colon: int, position: int) -> tuple[list[int],
     if not starts:
         return starts, None
     if text.startswith("//", colon + 1):
-        return starts, context.tail_stop(colon + 3)
+        end = _authority_and_path(context, colon + 3)
+        if end is not None:
+            return starts, end
     # The head cannot hold `@` or `/`, so it ends at the first character it cannot hold, and
-    # the opaque branch matches only if that character is one of the two.
+    # the opaque branch matches only if that character is one of the two. It is also what
+    # reads `scheme://` whose authority is no host, from its first `/`.
     head_end = context.head_stop(colon + 1)
     if head_end < len(text) and text[head_end] in "@/":
-        return starts, context.tail_stop(head_end + 1)
+        return starts, context.opaque_stop(head_end + 1)
     return starts, None
+
+
+def _authority_and_path(context: _Context, start: int) -> int | None:
+    """Where `{_URL_AUTH}{_URL_PATH}` matched at `start` ends, or None.
+
+    The userinfo is tried first, as the pattern tries it: it holds no `@`, so it is there only
+    when the first character it cannot hold is `@`, and when no host follows that `@` the
+    pattern goes back and reads a host from `start`.
+    """
+    text = context.text
+    userinfo_end = context.userinfo_stop(start)
+    if userinfo_end < len(text) and text[userinfo_end] == "@":
+        end = _host_and_path(context, userinfo_end + 1)
+        if end is not None:
+            return end
+    return _host_and_path(context, start)
+
+
+def _host_and_path(context: _Context, start: int) -> int | None:
+    text = context.text
+    host = _URL_HOST_AT.match(text, start)
+    if host is None:
+        return None
+    end = _PORT_AT.match(text, host.end()).end()  # type: ignore[union-attr]
+    if end < len(text) and text[end] in "/?#":
+        end = context.path_stop(end + 1)
+    return end
 
 
 def _address_at(context: _Context, at: int, position: int) -> tuple[list[int], int | None]:
@@ -620,7 +672,9 @@ def _canonical_url(url: str) -> str:
     parts = _parse_url(url)
     if not parts.host:
         return url
-    authority = f"{parts.host}:{parts.port}" if parts.port else parts.host
+    # An IPv6 address stands in brackets in a URL, and keeps them in the canonical form.
+    host = f"[{parts.host}]" if ":" in parts.host else parts.host
+    authority = f"{host}:{parts.port}" if parts.port else host
     if parts.userinfo:
         authority = f"{parts.userinfo}@{authority}"
     rebuilt = f"{parts.scheme}://{authority}" if parts.scheme else authority

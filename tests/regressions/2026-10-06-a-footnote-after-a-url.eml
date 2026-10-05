@@ -1,0 +1,12 @@
+From: Alice <alice@example.net>
+To: recipient@example.net
+Subject: a footnote right after a URL
+Date: Tue, 06 Oct 2026 10:00:00 +0200
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+See http://www.example.org[1] for the terms.
+Write to mailto:help@example.org[2] with questions.
+The address http://192.0.2.10[3] answers too.
+
+[1] the first note

@@ -30,7 +30,10 @@ def test_the_scan_finds_what_the_alternation_finds() -> None:
     alphabet = [*"aAzZ19._-+:@/?#=&%~!*'\"()[]{}<>,;|`^$_ \n", "é", chr(0x661), "..", "://"]
     alphabet += ["@a.b"]
     alphabet += ["a.b", "www.", "mailto:", "x.co", "::", "1.2.3.4"]
-    texts = _strings(alphabet, 4000, 30)
+    # The parts of a URL with an authority, where the rules of each part differ.
+    alphabet += ["http://", "u@", "[::1]", "[2001:db8::1]", ":80", ":", ",http://", "/x", "?q"]
+    alphabet += ["#f", "%41", "(y)", ","]
+    texts = _strings(alphabet, 6000, 30)
 
     def by_pattern(text: str) -> list[tuple[int, int, str | None]]:
         return [(m.start(), m.end(), m.lastgroup) for m in observables._MASTER.finditer(text)]
@@ -38,6 +41,14 @@ def test_the_scan_finds_what_the_alternation_finds() -> None:
     found = [list(observables._matches(text)) for text in texts]
     kinds = [kind for matches in found for _, _, kind in matches]
     assert kinds.count("url_scheme") > 300 and kinds.count("email") > 300
+    urls = [
+        text[start:end]
+        for text, matches in zip(texts, found, strict=True)
+        for start, end, kind in matches
+        if kind == "url_scheme"
+    ]
+    assert sum("@" in url.split("//", 1)[-1].split("/", 1)[0] for url in urls if "//" in url) > 50
+    assert sum("[" in url for url in urls) > 50 and sum("," in url for url in urls) > 15
     assert found == [by_pattern(text) for text in texts]
 
 

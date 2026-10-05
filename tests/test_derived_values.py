@@ -30,12 +30,17 @@ def test_a_host_that_is_not_labels_gives_no_domain(client: TestClient, mark: str
     """0.6.0 returned `a.example.net;b.example.org` as a `domain`, and the same with each of
     these characters, as text and as an attribute alike.
 
-    The control is the same URL without the character, which gives its domain.
+    In an attribute the attribute gives the URL's boundaries, so the URL is the whole of it and
+    gives no domain. In text, since `[D32]`, the host ends at the character, so what comes back
+    on either side is labels; either way no `domain` holds it. The control is the same URL
+    without the character, which gives its domain.
     """
     url = f"http://a.example.net{mark}b.example.org/x"
     for found in (_from_text(client, url), _from_href(client, url)):
-        assert ("url", url) in found
-        assert [value for kind, value in found if kind == "domain"] == []
+        assert [value for kind, value in found if kind == "domain" and mark in value] == []
+    found = _from_href(client, url)
+    assert ("url", url) in found
+    assert [value for kind, value in found if kind == "domain"] == []
     assert ("domain", "a.example.net") in _from_href(client, "http://a.example.net/x")
 
 

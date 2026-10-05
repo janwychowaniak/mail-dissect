@@ -541,14 +541,24 @@ and a registry alone could not tell an address from a sentence.
 
 - **`url`** — a string with a scheme per RFC 3986; **also without a scheme** when it has a path
   or a `www.` prefix (`bit.ly/xyz`, `www.example.com`), because shorteners and protocol-less
-  addresses are everyday content and a consumer should not lose them.
+  addresses are everyday content and a consumer should not lose them. Its parts follow RFC
+  3986's two grammars `[D31]`: a `,` or a `)` may stand in the path, query or fragment of a URL
+  with an authority — `scheme://…`, and a URL without a scheme — and ends the authority and any
+  URL without one (`mailto:`, `sip:`, `data:`), where a comma separates recipients (RFC 6068);
+  a comma directly before another `scheme://` ends a URL. `[` and `]` end a URL, except around
+  an IP-literal host directly after `//`, which keeps its brackets in `value` and gives its
+  address as an `ip`. In text, a host is labels or an IP literal, with an optional port, and any
+  other character ends the URL `[D32]`: markup glued to a host is left out of it, and a
+  sub-delimiter inside a host makes two URLs.
 - **`domain`** — labels per RFC 1035 ending in a **public suffix from the registry**; also
   derived from a URL's host **and from an email address's domain** (decompose, do not select —
   asymmetry between those two sources would be accidental). A host gives a `domain` only when
   it is labels — letters and digits in any script, `_` and `-`, separated by periods — and a
   URL whose host is anything else is returned without one `[D30]`. A percent-encoded host is
   not labels as written, and nothing is decoded.
-- **`ip`** — IPv4 and IPv6 grammar, with no filtering of private or reserved addresses.
+- **`ip`** — IPv4 and IPv6 grammar, with no filtering of private or reserved addresses. IPv4 is
+  dotted decimal: an address written otherwise in a URL's host — `3221225994`, `0xc000020a`,
+  `0300.0.02.012`, each 192.0.2.10 to a browser — gives the URL and no `ip`.
 - **`email`** — `addr-spec` per RFC 5322. The address of a `mailto:` URL is a list of
   recipients separated by commas (RFC 6068), and each recipient that is one address — a local
   part by the address grammar and a domain of labels — is an `email`; one that is not gives
@@ -585,7 +595,9 @@ test that separates `mailto:a@example.com` from the `Note:this` of an ordinary s
 without a list of schemes we happen to approve of.
 
 IPs are matched loosely and validated with a real IP parser. Trailing punctuation is trimmed
-from URLs by a fixed rule: strip trailing `.,;:!?"'`, then strip unbalanced `)]}>`.
+from URLs by a fixed rule: characters come off the end while each is one of `.,;:!?"'`, or a
+closer — `)`, `]` or `}` — with fewer of its openers than of itself in what is left. A `>`
+never stands inside a URL, so there is none to trim.
 
 **What may stand next to an IPv4 address** `[D26]`. A **label character** — a letter, a digit
 or an underscore, in any script — directly before or after the address rules it out: four
@@ -1244,6 +1256,34 @@ Approved by the maintainer, 2026-09-17.
   percent-encoded host gives no `domain`, since decoding it would be a parser in front of the
   parser; a host that is a public suffix and nothing more, one label, is still a `domain`, as
   it was; and a period at the end of a recipient's domain is read as in a host, which loses it.
+- **[D31] A URL is read with RFC 3986's two grammars, one for the authority and one for the
+  path, query and fragment** (§11.2). Decided 2026-10-05, for 0.7.0. Until then one character
+  class covered the whole URL and refused `,`, `)` and `]` everywhere, so `?ids=1,2,3` came back
+  as `?ids=1`, `/wiki/Foo_(bar)` as `/wiki/Foo_(bar`, `http://[2001:db8::1]/x` as
+  `http//[2001:db8::1` with no address, and a footnote after a URL, `http://example.net[1]`, as
+  `http//example.net[1` with its domain lost. The trimming rule already spoke of unbalanced
+  closers, which the class kept out of every match but `}`. A `,` and a `)` are now part of a
+  path, query or fragment, and end the authority and a URL with none, where a comma separates
+  the recipients of `mailto:` (RFC 6068) and keeps a `data:` payload out; `[` and `]` end a URL
+  except around an IP-literal host. One class for the whole URL was tried first and regressed
+  `mailto:` lists, `sip:`, a comma or a `)` in a host, port or userinfo, and `data:`, which no
+  case written until then held. **Costs recorded:** a list joined by a comma with no space
+  after a URL with a path is one path to RFC 3986, so `…/x,mailto:u@example.net`,
+  `…/x,b@c.example.org` and `a.example.net/x,b.example.org` each come back as one URL, the
+  second address or domain inside it; a comma directly before another `scheme://` ends the URL,
+  so a list of full URLs is not.
+- **[D32] In text, a URL's host is labels or an IP literal**, not RFC 3986's reg-name (§11.2).
+  Decided 2026-10-05, for 0.7.0. A reg-name may hold `! $ & ' ( ) * + , ; = ~`, and taking that
+  grammar for a host in text read `**http://a.example.net**` as the URL `http://a.example.net**`,
+  whose host is no domain, and lost the domain for every URL in bold, in pipes or in back
+  quotes. A host is now labels of letters and digits in any script, `_`, `-` and `%`, or an IP
+  literal, with an optional port, and any other character ends the URL, so markup is left out
+  and a sub-delimiter inside a host makes two URLs. `%` is a label character so that a
+  percent-encoded host is not cut in half; it gives no `domain` `[D30]`. In an attribute the
+  attribute gives the boundaries, and the host is read as the URL parser reads it. **Left as it
+  is:** `**http://a.example.net/x**` keeps `**` at the end of its path, where `*` is legal, and
+  trimming it would change URLs that end in one; `http://**a.example.net`, with no host after
+  `//`, is read from its first `/` as before, and gives no `domain`.
 
 **Implementation**
 
