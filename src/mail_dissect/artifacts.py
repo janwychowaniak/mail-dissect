@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import re
 import secrets
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -112,6 +113,12 @@ class ArtifactStore:
         self._ttl = ttl_seconds
         self._clock = clock
         self._index: dict[tuple[str, str], _Record] = {}
+        # A put runs in a dissection's worker thread and a sweep in another, and two races
+        # follow: the sweep iterates the index while a put adds to it, and it removes a
+        # directory it finds empty, which a put may have just made and not yet written into.
+        # So a put and a sweep each hold this for their whole length. A lookup does not: it
+        # reads one key, which the GIL makes atomic, and it runs on the event loop.
+        self._lock = threading.Lock()
 
     @property
     def root(self) -> Path:
@@ -136,19 +143,20 @@ class ArtifactStore:
         artifact_id = new_id()
         directory = self._root / dissect_id
         path = directory / artifact_id
-        try:
-            directory.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(data)
-        except OSError as exc:
-            log_event("artifact_store_failed", dissect_id=dissect_id, error=type(exc).__name__)
-            return None
         safe_name = sanitise_filename(filename, f"{kind}.bin")
-        self._index[(dissect_id, artifact_id)] = _Record(
-            path=path,
-            filename=safe_name,
-            size=len(data),
-            expires_at=self._clock() + self._ttl,
-        )
+        with self._lock:
+            try:
+                directory.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+            except OSError as exc:
+                log_event("artifact_store_failed", dissect_id=dissect_id, error=type(exc).__name__)
+                return None
+            self._index[(dissect_id, artifact_id)] = _Record(
+                path=path,
+                filename=safe_name,
+                size=len(data),
+                expires_at=self._clock() + self._ttl,
+            )
         return ArtifactRef(
             artifact_id=artifact_id,
             message_index=message_index,
@@ -177,26 +185,28 @@ class ArtifactStore:
 
     def sweep(self) -> int:
         """Delete expired files, keep their tombstones. Returns how many were removed."""
-        now = self._clock()
         removed = 0
-        for record in self._index.values():
-            if record.expired or now < record.expires_at:
-                continue
-            record.expired = True
-            try:
-                record.path.unlink(missing_ok=True)
-                removed += 1
-            except OSError:
-                pass
-            parent = record.path.parent
-            try:
-                next(parent.iterdir())
-            except StopIteration:
-                parent.rmdir()
-            except OSError:
-                pass
+        with self._lock:
+            now = self._clock()
+            for record in self._index.values():
+                if record.expired or now < record.expires_at:
+                    continue
+                record.expired = True
+                try:
+                    record.path.unlink(missing_ok=True)
+                    removed += 1
+                except OSError:
+                    pass
+                parent = record.path.parent
+                try:
+                    next(parent.iterdir())
+                except StopIteration:
+                    parent.rmdir()
+                except OSError:
+                    pass
         return removed
 
     def dissect_ids(self) -> list[str]:
         """Only for tests and the sweeper's own bookkeeping; never exposed over HTTP."""
-        return sorted({dissect_id for dissect_id, _ in self._index})
+        with self._lock:
+            return sorted({dissect_id for dissect_id, _ in self._index})

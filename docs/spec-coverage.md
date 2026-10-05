@@ -22,6 +22,9 @@ addresses, and an IPv6 address before its full stop. **Cases 72–73 were added 
 a measurement on the published 0.5.0 image showed that a `;` after an encoded-word in a name
 was rewritten as a parameter, and that two encoded-words in a name were joined only because the
 image's Python happened to join them (F21); until then no case said how a part's name is read.
+**Case 74 was added in 0.7.0**: until then everything a dissection did after parsing ran on the
+event loop that answers `/v1/health`, and no case asked whether health answers while a
+dissection is in progress.
 Any further case gets the next free number and a line saying where it came from.
 
 ## Functional requirements
@@ -122,6 +125,7 @@ Any further case gets the next free number and a line saying where it came from.
 | 71 | a period or a hyphen that touches an IPv4 address is punctuation unless a label character continues on its far side: an address before or after one is returned without the mark, in a header, a text body and an HTML body; four numbers inside a longer token are not; a range returns both ends or neither | §11.2 | `test_ipv4_boundary::test_a_saved_message`, `…_every_source_is_read_by_the_same_rule`, `…_a_mark_with_no_label_character_beyond_it_is_punctuation`, `…_a_label_character_rules_the_address_out`, `…_a_range_returns_both_ends_or_neither`, `…_an_occurrence_the_rule_recognises_leads_the_entry_it_joins` (+ `…_what_was_measured_and_left`) |
 | 72 | a part's name is read by one rule: `filename`, else `name`; the RFC 2231 form wins wherever it stands; the plain form loses the white space between two adjacent encoded-words and nothing else; the charset form is read no further and gives way to the plain one, flagged, when its charset is not taken; white space at the ends goes, a period stays; `artifacts[].filename` and the served name are that reading after §13.3 alone | §6.4, §13.3 | `test_filename::test_a_saved_name`, `…_the_plain_form_is_read_as_unstructured_text`, `…_the_rfc2231_form_wins_wherever_it_stands`, `…_a_name_declared_with_a_charset_is_read_no_further`, `…_an_unreadable_charset_form_gives_way_to_the_plain_one_and_says_so`, `…_the_flag_describes_what_was_read`, `…_white_space_at_the_ends_goes_and_a_period_stays`, `…_the_served_name_is_the_reading_after_sanitising_and_nothing_else` |
 | 73 | `extension` is the text after the last period of the name's last path component, lowercased, when that period is neither its first character nor its last: `.profile` and `archive.exe.` have none | §6.4 | `test_filename::test_the_extension_follows_the_last_period_of_the_last_component` |
+| 74 | `/v1/health` answers while a dissection is in progress, at every stage after the request is read — building, scanning, a document's text, the hashes, serialisation — and while the artifact store is swept | §14.3 | `test_event_loop::test_health_answers_while_a_dissection_runs` (one row per stage, and a control that runs on the loop), `…_while_the_store_is_swept` |
 
 ## Resilience
 
@@ -136,6 +140,8 @@ Any further case gets the next free number and a line saying where it came from.
 | `received[]`, `auth[]` and `encoding_fallback` do not depend on where a header was folded | §7, §5.1 | `test_folding::test_received_is_decomposed_the_same_folded_or_not`, `…_authentication_results_are_decomposed_the_same_folded_or_not`, `…_a_folded_address_header_reports_what_its_unfolded_twin_reports` |
 | The extractor gets the declared type only when a request header can carry it | §14.1 | `test_tools::test_the_extractor_gets_a_type_a_header_can_carry` |
 | `encoding_fallback` fires when a declaration is not taken or something is substituted, and only then — and not for what the service does not read | §5.1, §7.2, §6.4, `[D20]`, `[D27]` | `test_intake::test_an_eight_bit_header_byte_is_replaced_and_reported`, `…_flagged_only_when_reading_it_fell_back`, `…_raw_utf8_in_an_address_is_read_without_loss`, `…_non_ascii_byte_in_a_part_header_is_read_and_served`, `…_filename_is_flagged_only_when_its_declaration_fails`, `test_filename::test_the_flag_describes_what_was_read` |
+| The deadline is checked between messages: a message whose scan would start after it is returned whole, with no candidates | §15, `[D10]` | `test_event_loop::test_a_message_scanned_after_the_deadline_gives_no_candidates` |
+| A write and a sweep in two threads do not race: the sweep's pass over the index, and a directory the write has made and not yet filled | §13.4 | `test_artifacts::test_a_write_during_a_sweep_does_not_break_it`, `…_a_sweep_leaves_the_directory_a_write_is_filling` |
 | Determinism, including array order | §17 | `test_determinism::test_the_same_message_twice`, `…both_channels_agree` |
 | A stable reordering is still caught | §17 | `test_determinism::test_golden_observables` |
 | The tool contracts hold against the real images | §14 | `test_live_tools` (marker `live`, by hand) |

@@ -853,6 +853,15 @@ every mechanism that restarts unhealthy containers would kill a working service 
 else's problems. States in `tools{}` mean the same as in the dissection response, except that
 `skipped` does not occur, as there is no material to process — no address gives `disabled`.
 
+**Health is answered while a dissection is in progress.** Both endpoints run on one event loop,
+and the loop only awaits a dissection. Everything CPU-bound in it — parsing, building and
+scanning each message, scanning a document's text, the `source` hashes, serialising the answer
+— runs in a worker thread, a message or an attachment at a time, and so does the artifact
+store's sweep. Work done on the loop is time in which health cannot answer at all, while
+nothing is wrong with the service. A worker thread does not help with a single call that holds
+the interpreter lock from start to end, such as one regular-expression search or one
+serialisation: such a call delays health by its own length wherever it runs.
+
 **How health knows the dependency state: an on-demand probe with a short cache** `[D6]`.
 Telling `ok` from `down` requires knocking on the tool, but probing on every call turns health
 into a traffic amplifier: a mechanism asking every few seconds then knocks on both dependencies
@@ -911,7 +920,9 @@ anything.
 
 **The whole budget is enforced at work-unit boundaries** — a message, an attachment, a single
 dependency call — and not in the middle of parsing: the service checks the deadline between
-units and stops before the next one, returning what it has computed `[D10]`. The asynchronous
+units and stops before the next one, returning what it has computed `[D10]`. A message parsed in
+time is returned whole, and if the deadline has passed by the time its scan would start, it is
+returned with no candidates. The asynchronous
 model does not exempt us from this: a limit placed on an I/O operation cancels the wait but
 does not interrupt parsing in progress, so without an explicit deadline `truncated` is
 unimplementable, not merely imprecise.

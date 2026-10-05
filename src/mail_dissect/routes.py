@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, JSONResponse
 
@@ -12,7 +14,7 @@ from .dissect import build_response
 from .errors import AppError, new_dissect_id
 from .intake import boundary_of, extract_form_field, looks_like_message
 from .jsonlog import log_event
-from .models import HealthOut, RegistryVersionsOut
+from .models import DissectResponse, HealthOut, RegistryVersionsOut
 
 router = APIRouter(prefix="/v1")
 
@@ -81,6 +83,15 @@ async def dissect(request: Request) -> JSONResponse:
         flags=response.flags,
         duration_ms=round((clock() - started) * 1000, 1),
     )
+    return await asyncio.to_thread(_render, response)
+
+
+def _render(response: DissectResponse) -> JSONResponse:
+    """The answer as JSON, off the event loop like the rest of the dissection (SPEC §14.3).
+
+    Each of the two calls holds the GIL from start to end, so health waits while one of them
+    runs, in a thread or not. What bounds that wait is the size of the response.
+    """
     return JSONResponse(content=response.model_dump(by_alias=True))
 
 

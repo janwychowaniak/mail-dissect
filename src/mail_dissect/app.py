@@ -104,9 +104,13 @@ def _build_probes(
 
 
 async def _sweep_forever(store: ArtifactStore) -> None:
-    """Delete expired artifacts in the background; tombstones stay in the index (SPEC §13.4)."""
+    """Delete expired artifacts in the background; tombstones stay in the index (SPEC §13.4).
+
+    In a worker thread: the sweep waits for the store's lock, which a write of a large
+    artifact holds, and the loop must not wait with it.
+    """
     while True:
         await asyncio.sleep(SWEEP_INTERVAL_SECONDS)
-        removed = store.sweep()
+        removed = await asyncio.to_thread(store.sweep)
         if removed:
             log_event("artifacts_swept", removed=removed)

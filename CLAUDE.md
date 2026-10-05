@@ -13,8 +13,10 @@
   `flags`, `tools` — extending any of them is a `/v2` change, not a commit.
 - **Never log message content or an `artifact_id`.** `dissect_id` may be logged.
 - **`async def` endpoints**; outbound calls go through `httpx.AsyncClient` with
-  `trust_env=False`. CPU-bound parsing is offloaded with `asyncio.to_thread`, one message or one
-  attachment per unit.
+  `trust_env=False`. CPU-bound work — parsing, building and scanning a message, a document's
+  text, the hashes, serialisation, the store's sweep — is offloaded with `asyncio.to_thread`,
+  one message or one attachment per unit. The event loop only awaits: `/v1/health` is answered
+  on it (case 74).
 - **Test material is synthetic only.** No third-party mail corpora, ever (`docs/SPEC.md` §18).
 - **Somebody else's data never enters this repository** — not a corpus, and not statistics
   derived from one. A measurement taken on a maintainer's own mail arrives here as a

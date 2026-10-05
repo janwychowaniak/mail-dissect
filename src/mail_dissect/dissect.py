@@ -129,8 +129,10 @@ async def build_response(
 ) -> DissectResponse:
     """Dissect the input, call the optional tools, and assemble the answer.
 
-    Parsing is CPU-bound and runs in a worker thread; the tools are I/O and run concurrently.
-    The budget is enforced between units of work rather than around them `[D10]`.
+    Everything CPU-bound runs in a worker thread, one message or one attachment at a time, and
+    the event loop only awaits it: `/v1/health` is answered on the same loop (SPEC §14.3). The
+    tool calls are I/O, so they stay on the loop and run concurrently. The budget is enforced
+    between units of work rather than around them `[D10]`.
     """
     dissection = await asyncio.to_thread(
         dissect_messages,
@@ -144,7 +146,10 @@ async def build_response(
     assembly.registries = registries
     assembly.flags |= dissection.flags
 
-    built = [_build_message(parsed, assembly, settings) for parsed in dissection.messages]
+    built = [
+        await asyncio.to_thread(_build_message, parsed, assembly, settings, deadline)
+        for parsed in dissection.messages
+    ]
 
     tika = ToolTally(bool(settings.tika_url))
     renderer = ToolTally(bool(settings.screenshot_url))
@@ -157,9 +162,9 @@ async def build_response(
 
     for item in built:
         # Materialised last, so document text can only ever extend the tail `[D9]`.
-        item.message.observables = _materialise(item.collector, assembly)
+        item.message.observables = await asyncio.to_thread(_materialise, item.collector, assembly)
 
-    digests = hash_bytes(raw)
+    digests = await asyncio.to_thread(hash_bytes, raw)
     ordered = [flag for flag in _FLAG_ORDER if flag in assembly.flags]
     return DissectResponse(
         dissect_id=dissect_id,
@@ -213,19 +218,23 @@ async def _extract_document_text(
 
     for item, info, text, state in await asyncio.gather(*jobs):
         tally.record(state)  # type: ignore[arg-type]
-        if not text:
-            continue
-        artifact_id = assembly.store_artifact(
-            "attachment_text",
-            text.encode("utf-8"),
-            message_index=item.message.index,
-            part_index=info.index,
-            filename=f"{info.filename or f'part-{info.index}'}.txt",
-        )
-        for attachment in item.message.attachments:
-            if attachment.part_index == info.index:
-                attachment.text_artifact_id = artifact_id
-        item.collector.feed_text(text, Source(kind="attachment", part_index=info.index))
+        if text:
+            await asyncio.to_thread(_apply_document_text, item, info, text, assembly)
+
+
+def _apply_document_text(item: _Built, info: PartInfo, text: str, assembly: _Assembly) -> None:
+    """Store one document's text and scan it: a unit of work like a message."""
+    artifact_id = assembly.store_artifact(
+        "attachment_text",
+        text.encode("utf-8"),
+        message_index=item.message.index,
+        part_index=info.index,
+        filename=f"{info.filename or f'part-{info.index}'}.txt",
+    )
+    for attachment in item.message.attachments:
+        if attachment.part_index == info.index:
+            attachment.text_artifact_id = artifact_id
+    item.collector.feed_text(text, Source(kind="attachment", part_index=info.index))
 
 
 def _type_for_the_extractor(info: PartInfo) -> str:
@@ -265,7 +274,7 @@ async def _render_messages(
         async with semaphore:
             if deadline.expired():
                 return item, None, None, "timeout"
-            html, assets = _render_payload(item)
+            html, assets = await asyncio.to_thread(_render_payload, item)
             image, mime, state = await renderer.render(
                 html, assets, deadline.budget(settings.screenshot_timeout_seconds)
             )
@@ -279,7 +288,8 @@ async def _render_messages(
         tally.record(state)  # type: ignore[arg-type]
         if image is None or mime is None:
             continue
-        assembly.store_artifact(
+        await asyncio.to_thread(
+            assembly.store_artifact,
             "screenshot",
             image,
             message_index=item.message.index,
@@ -335,7 +345,9 @@ def _materialise(collector: Collector, assembly: _Assembly) -> list[ObservableOu
     ]
 
 
-def _build_message(parsed: ParsedMessage, assembly: _Assembly, settings: Settings) -> _Built:
+def _build_message(
+    parsed: ParsedMessage, assembly: _Assembly, settings: Settings, deadline: Deadline
+) -> _Built:
     index = parsed.index
     # [D12]: the eml artifact carries the bytes that were in the input.
     assembly.store_artifact("eml", parsed.raw, message_index=index, filename=f"message-{index}.eml")
@@ -348,7 +360,7 @@ def _build_message(parsed: ParsedMessage, assembly: _Assembly, settings: Setting
     cid_map = _cid_map(parsed)
     body = _build_body(parsed, assembly, settings, scan)
     links, resources = _build_addresses(scan, assembly, cid_map)
-    collector = _scan_observables(parsed, assembly, scan)
+    collector = _scan_observables(parsed, assembly, scan, deadline)
     message = MessageOut(
         index=index,
         depth=parsed.depth,
@@ -397,16 +409,22 @@ def _build_message(parsed: ParsedMessage, assembly: _Assembly, settings: Setting
 
 
 def _scan_observables(
-    parsed: ParsedMessage, assembly: _Assembly, scan: HtmlScan | None
+    parsed: ParsedMessage, assembly: _Assembly, scan: HtmlScan | None, deadline: Deadline
 ) -> Collector:
     """Scan this message in the order of `[D9]`: headers, then text, then HTML.
 
     The collector is append-only, so candidates that a later stage adds from document text
     can only extend the tail - the deterministic core of the list does not move when the
     text extractor is absent or fails (test 62).
+
+    The deadline is checked here, between messages `[D10]`. A message whose scan would start
+    after it is still returned, since it was parsed in time, with no candidates.
     """
     assert assembly.registries is not None
     collector = Collector(assembly.registries)
+    if deadline.expired():
+        assembly.flags.add("truncated")
+        return collector
 
     for name, values in parsed.headers.items():
         for index, value in enumerate(values):
