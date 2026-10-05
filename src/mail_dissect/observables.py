@@ -101,6 +101,15 @@ _MAX_DEFANG_TOKEN = 2048
 _CHUNK = 65_536
 _WHITE_SPACE = re.compile(r"\s")
 
+# [D29]: a run of non-white-space characters longer than this is skipped whole, and the
+# response says `truncated`. Its first characters would give readings the run does not
+# contain, and a cut would give cut values; the rest of the text reads exactly as before,
+# because no candidate contains white space. The lookbehind is what keeps finding a run cheaper
+# than reading one: without it, every position inside a run counts to the run's end again
+# whenever enough text follows in the chunk, about eight seconds for each run built so.
+MAX_RUN_LENGTH = 262_144
+_LONG_RUN = re.compile(rf"(?<!\S)\S{{{MAX_RUN_LENGTH + 1},}}")
+
 _TRAILING_PUNCTUATION = ".,;:!?\"'"
 _CLOSERS = {")": "(", "]": "[", "}": "{"}
 _HASH_SUBTYPES: dict[int, ObservableSubtype] = {
@@ -139,7 +148,7 @@ class Collector:
     same entries in the same positions and a longer list.
     """
 
-    __slots__ = ("_order", "_registries", "_seen", "_should_stop", "stopped")
+    __slots__ = ("_order", "_registries", "_seen", "_should_stop", "stopped", "truncated")
 
     def __init__(
         self, registries: Registries, should_stop: Callable[[], bool] | None = None
@@ -151,6 +160,8 @@ class Collector:
         # stop, nothing more is added: the list ends where the scan stopped.
         self._should_stop = should_stop
         self.stopped = False
+        # Something the material holds was not read: the scan stopped, or a run was skipped.
+        self.truncated = False
 
     def feed_text(self, text: str, source: Source) -> None:
         """Scan a blob; overlapping matches are resolved once, in document order.
@@ -162,10 +173,11 @@ class Collector:
         for chunk in _chunks(text):
             if self._stop():
                 return
-            for kind, raw in _scan(chunk):
-                trimmed = _trim(raw)
-                if trimmed:
-                    self._classify(kind, trimmed, source)
+            for piece in self._without_long_runs(chunk):
+                for kind, raw in _scan(piece):
+                    trimmed = _trim(raw)
+                    if trimmed:
+                        self._classify(kind, trimmed, source)
 
     def feed_url(self, href: str, source: Source) -> None:
         """An address taken from an anchor or a resource, which needs no grammar to find."""
@@ -180,7 +192,25 @@ class Collector:
     def _stop(self) -> bool:
         if not self.stopped and self._should_stop is not None and self._should_stop():
             self.stopped = True
+            self.truncated = True
         return self.stopped
+
+    def _without_long_runs(self, chunk: str) -> list[str]:
+        """The chunk with every run longer than `MAX_RUN_LENGTH` left out `[D29]`.
+
+        A run never crosses a chunk, since chunks are cut at white space, and each piece left
+        ends and begins with white space, so it reads as it did inside the chunk.
+        """
+        pieces: list[str] = []
+        start = 0
+        for run in _LONG_RUN.finditer(chunk):
+            self.truncated = True
+            pieces.append(chunk[start : run.start()])
+            start = run.end()
+        if not pieces:
+            return [chunk]
+        pieces.append(chunk[start:])
+        return pieces
 
     # -- classification ----------------------------------------------------------------
     def _classify(self, kind: str, raw: str, source: Source) -> None:

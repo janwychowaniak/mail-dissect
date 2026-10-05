@@ -508,7 +508,8 @@ entries for the most common wrappers as **configuration examples to copy**, not 
 `observables[]` is the **canonical list of all indicators** found in one message, no matter
 where they lay: in text content, in HTML (including as an anchor or resource address), in
 headers, and in text extracted from documents. Whoever wants a complete list of addresses takes
-`observables` and can be sure nothing escaped. `links[]` and `resources[]` are a **supplement,
+`observables` and can be sure nothing escaped, unless the response says `truncated`: then a
+limit or the deadline (§15) left part of the material unread. `links[]` and `resources[]` are a **supplement,
 not an alternative**: they add HTML context (anchor text, element kind) that a flat list of
 indicators does not carry. The same address appears in both places, and that is intended.
 
@@ -876,7 +877,9 @@ dissection come from calls made during that dissection.
 
 ## 15. Limits and time budgets
 
-Hostile input is the assumption, so limits replace trust. All are configurable (§19).
+Hostile input is the assumption, so limits replace trust. The variables in the table are
+configurable (§19). The constants named after it are not: the configuration surface is closed,
+and a parameter nobody asked for is worse than its absence.
 
 | Variable | Default | What it bounds |
 | --- | --- | --- |
@@ -894,6 +897,15 @@ Hostile input is the assumption, so limits replace trust. All are configurable (
 | `ARTIFACT_DIR` | `/tmp` | artifact store directory |
 | `TIKA_URL`, `SCREENSHOT_URL` | empty | optional dependencies (empty = `disabled`) |
 | `UNWRAPPERS` | empty | the unwrapper table (§10) |
+
+**A run longer than `MAX_RUN_LENGTH` = 262,144 characters is skipped whole** `[D29]`. A run is
+a stretch of characters with no white space in it, white space being every character the
+grammar's `\s` matches, the no-break space among them; its length is counted in characters of
+the text the scan reads. Nothing is returned from such a run, and the response gets
+`truncated`, which here depends only on the material. The limit covers every text the grammar
+reads: a header value, a text body, a run of text in HTML, a document's text. An address taken
+from an attribute (`href`, `src`) is not read by the grammar and is not limited. RFC 9110 §4.1
+recommends that a URI of at least 8,000 octets be supported; the limit is about 32 times that.
 
 **There is deliberately no limit on the sum of attachments:** the sum of decoded bytes cannot
 exceed the input size, because transfer encoding only inflates — and the service does not
@@ -1187,6 +1199,19 @@ Approved by the maintainer, 2026-09-17.
   encoded-word — it was decoded a second time; an unreadable charset form beside a plain one —
   it now raises the flag; white space at the ends of a decoded name — it was kept; and
   `extension` of a name that starts with a period — `.profile` had `profile`.
+- **[D29] A run of more than `MAX_RUN_LENGTH` = 262,144 non-white-space characters is skipped
+  whole by the scan, and the response says `truncated`** (§15). Decided 2026-10-05, for 0.7.0.
+  The grammar's cost grows with the length of a run, and a sender controls that length
+  completely, so a bound is needed and it has to be a length. Reading only the first
+  characters of a long run would return readings the whole run does not contain, and cutting
+  it would return cut values, a URL without its end or a host that is half a name; skipping it
+  leaves the rest of the text reading exactly as it did, because no candidate contains white
+  space. Windows that overlap were rejected for the same reason: they cut a long candidate at
+  the seam. The limit is counted in characters, not bytes, because the cost is per character
+  and a character can be four bytes. Finding the runs must cost less than reading them
+  `[D13]`: the search starts only where a run starts. A search that may start inside a run
+  counts to the run's end again from every position in it, and a message can be built so
+  that this takes seconds for every run.
 
 **Implementation**
 

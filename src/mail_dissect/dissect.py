@@ -235,7 +235,7 @@ def _apply_document_text(item: _Built, info: PartInfo, text: str, assembly: _Ass
         if attachment.part_index == info.index:
             attachment.text_artifact_id = artifact_id
     item.collector.feed_text(text, Source(kind="attachment", part_index=info.index))
-    if item.collector.stopped:
+    if item.collector.truncated:
         assembly.flags.add("truncated")
 
 
@@ -449,7 +449,7 @@ def _scan_observables(
                 # so the two lists and this one describe the same thing (SPEC §11).
                 collector.feed_url(assembly.unwrapper.apply(event.href).href, source)
 
-    if collector.stopped:
+    if collector.truncated:
         assembly.flags.add("truncated")
     return collector
 
