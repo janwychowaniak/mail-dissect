@@ -552,9 +552,19 @@ and a registry alone could not tell an address from a sentence.
   filenames are **not** candidates from content: they are a fact in `attachments[]` and do not
   travel to `observables`.
 
-Matching is one compiled alternation applied in a single pass per unit, and **the order of the
-alternatives is part of the contract**, because it is what resolves overlaps: leftmost match
-wins, and at the same position the earlier alternative wins.
+**The order of the alternatives is part of the contract**, because it is what resolves
+overlaps: the earliest match wins, and at the same position the earlier alternative wins. The
+next candidate is the earliest match that starts where the last one ended, or later, so a
+candidate can start inside the run of characters the one before it ended in: in
+`a.b..c@d.example.com` the address is `c@d.example.com`, and `x:/y'z@a.example.com` is the URL
+`x:/y` followed by the address `'z@a.example.com`. This says what is found, not how it is
+searched for; any search that finds exactly this is the same contract.
+
+**No candidate contains white space**, white space being every character the grammar's `\s`
+matches. Three things rest on that rule: a text is scanned in chunks cut at white space (§15),
+a run longer than `MAX_RUN_LENGTH` is skipped without changing what the rest of the text gives
+`[D29]`, and a candidate never joins two words. An alternative that crossed white space —
+reading `user (at) example (dot) net` as one form, say — would quietly break all three.
 
 ```
 1 defanged form     2 url with scheme   3 email   4 schemeless url

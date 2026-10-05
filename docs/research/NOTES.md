@@ -784,20 +784,21 @@ grammar. Three properties follow from that construction:
 **The grammar on a run.** `sweep` repeats a unit into a run with no white space and doubles the
 run from 1,000 characters until one scan takes 0.2 s or the run reaches 128,000, best of two.
 The verdict is read from the last doubling, at a size where a per-call cost no longer hides
-the term looked for, never from the first ones, where it does. The units are every unit of
-one and two symbols and 500 seeded longer ones, 1,690 in all. On 0.6.0, 176 of them grow
-faster than linearly at their last doubling (ratio above 3), at 2,000 or 4,000 characters,
-each costing 115–140 µs a character there: half a second for 4,000 characters, with the
-cost growing as the square of the length. A second run, on a tree whose grammar is the same,
-counted 173: units near the threshold move between runs, and the count is a size, not an
-identifier. The defanged path is among them (`[.]}{.}`); so are the shapes where an address
-or a URL may start at every word boundary of a run and read to its end before failing (`a-`,
-`-a`, `a/`, `=a`). Which alternative each one costs is shown by the changes that remove it,
-and recorded with them.
+the term looked for, never from the first ones, where it does, and a ratio above 3 is
+measured again, best of five, before it counts. The units are every unit of one and two
+symbols and 500 seeded longer ones, 1,690 in all. On 0.6.0, 162 of them grow faster than
+linearly at their last doubling, at 2,000 or 4,000 characters, each costing 130–170 µs a
+character there: more than half a second for 4,000 characters, with the cost growing as the
+square of the length. Before the second measurement was added, two runs counted 176 and 173:
+units near the threshold moved between runs, so the count is a size, not an identifier. The
+defanged path is among them (`[.]}{.}`); so are the shapes where an address or a URL may start
+at every word boundary of a run and read to its end before failing (`a-`, `1+`, `a'`, `#a`).
+Real base64 in one line, the `+` and `/` of its alphabet putting a word boundary every few
+characters, takes 5.47, 19.05 and 71.92 s for 48k, 96k and 192k characters (`shapes v0.6.0`).
 
-**The comparison every change to the grammar is held to.** `layer1` compares, for each of
-8,318 generated strings, the spans `_scan` takes and the candidates made from them, between
-two trees; `layer2` compares the full response of every message the test suite sends, the
+**The comparison every change to the grammar is held to.** `layer1` compares, for each
+generated string, the spans `_scan` takes and the candidates made from them, between two
+trees; `layer2` compares the full response of every message the test suite sends, the
 saved messages and the golden samples, with the tools absent and present. Each prints a
 positive control, the same comparison with one input changed. Zero differences is the
 criterion, or each difference is recorded as a decision.
@@ -809,6 +810,20 @@ The ten are five messages in both modes, each one with a run past the limit: the
 messages of the pair test past the limit, which lose the URL and its host and gain
 `truncated`; the cost test's, which gains `truncated`; and a 3 MiB body of one run of `x`
 from the form-channel test, which gains `truncated` and nothing else.
+
+**After the scan loop (0.7.0).** A URI with a scheme and an address are found by their
+anchors, `:` and `@`: each anchor is read once, for where its stretch begins, which starts in
+it the grammar admits, and where the match after it ends, and the earliest match at or after a
+position is the first admitted start of the first anchor that has one. `sweep .` then counts
+21 units, and every one of them holds a marker of the defanged path: the shapes where an
+address or a URL could start anywhere are gone. Real base64 in one line takes 0.01, 0.03 and
+0.06 s. The control is ordinary text at 192k characters: prose takes 0.09 s against 0.14 s on
+0.6.0, and prose with a link and an address in every sentence 0.23 s against 0.19 s, the cost
+of reading each anchor where they are dense. `layer1`, now 38,318 strings with short ones
+dense in anchors, marks and white space, gives 0 differences against the tree before the
+change and against `v0.6.0`; the same comparison with a period admitted as the start of a
+local part shows 41, and with no scheme starting after a period 132. `layer2` gives 0 of
+1,208 responses, leaving out what the cost tests send, which the old tree takes minutes over.
 
 ---
 

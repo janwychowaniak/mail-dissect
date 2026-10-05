@@ -5,6 +5,7 @@ Acceptance cases 22, 24, 25, 26, 27, 28, 32, 33, 34, 35, 56, 66.
 
 from __future__ import annotations
 
+import base64
 import random
 import time
 
@@ -239,16 +240,20 @@ def test_the_extension_supplement_changes_recognition(settings: Settings, clock:
     assert found[0]["ambiguous"] is False  # `scr` is not a public suffix
 
 
+@pytest.mark.cost
 def test_a_base64_heavy_body_does_not_blow_up_the_scan(client: TestClient) -> None:
     """The grammar must stay linear on long unbroken runs, which mail is full of.
 
-    Any "run of characters, then a required marker" construction backtracks over the whole
-    run at every position where the marker is absent. The defanged alternative was written
-    that way once and took 154 seconds on 200 kB; the assertion is on the clock, because the
-    output looks identical either way. A full performance guard follows in stage 6 - this one
-    exists now, while the class of bug is fresh.
+    The run is real base64, with the `+` and `/` of its alphabet, in one line. An address may
+    start at every word boundary, and those two characters put one every few characters; a
+    search for an address read from each of them to the end of the run before it failed, which
+    took about seventy seconds here (F22). The test used to repeat a unit of letters and digits
+    alone, with no boundary inside it, and passed against that search: an address could start
+    only where the run did. The assertion is on the clock, because the output looks identical
+    either way.
     """
-    body = ("QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVowMTIzNDU2Nzg5" * 4_000).encode()
+    body = base64.b64encode(random.Random(19).randbytes(144_000))
+    assert body.count(b"+") > 1000 and body.count(b"/") > 1000
     raw = b.multipart("mixed", b.part("text/plain", body))
 
     started = time.perf_counter()
@@ -358,6 +363,16 @@ def test_a_candidate_may_start_inside_a_run_another_one_ended_in(client: TestCli
             ("domain", "b.example.net"),
         ],
         "a'http://f.example.net/": [("url", "http://f.example.net/"), ("domain", "f.example.net")],
+        # A local part never starts with a period, though one stands at a word boundary.
+        "one@a.example.net.+x@b.example.org": [
+            ("email", "one@a.example.net"),
+            ("domain", "a.example.net"),
+            ("email", "x@b.example.org"),
+            ("domain", "b.example.org"),
+        ],
+        # A scheme may start after a period inside its own run: `x` follows `_`, a word
+        # character, so it is no start, and `c` after the period is.
+        "_x.co://y.example.net/": [("url", "co://y.example.net/"), ("domain", "y.example.net")],
     }
     for text, expected in cases.items():
         found = _observables(client, f"see {text} now")

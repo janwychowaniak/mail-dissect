@@ -6,6 +6,7 @@ Run, from the repository root:
     uv run python docs/research/probes/grammar.py layer2 <old> [<new>]
     uv run python docs/research/probes/grammar.py sweep [<rev>]
     uv run python docs/research/probes/grammar.py defang [<rev>]
+    uv run python docs/research/probes/grammar.py shapes [<rev>]
 
 F22 in ../NOTES.md is produced here. A revision is anything `git archive` takes; `.`, the
 default for <new> and <rev>, is the working tree. Each tree is imported in a process of its
@@ -14,16 +15,21 @@ never quietly be a tree against itself.
 
 - `layer1`: the grammar's readings, old against new, on generated strings: every unit of one
   and two symbols and a seeded sample of longer ones, the shapes the readings depend on today,
-  a short prefix followed by a long run for each grammar with structure, and runs of words with
-  white space between them. For each string, the spans `_scan` takes and the candidates the
-  collector makes from them.
+  a short prefix followed by a long run for each grammar with structure, runs of words with
+  white space between them, and short strings dense with anchors, marks and white space. For
+  each string, the spans `_scan` takes and the candidates the collector makes from them.
 - `layer2`: the full response, old against new, of every message the test suite sends, plus
   the saved messages and the golden samples, with the text extractor and the renderer absent
-  and present. The suite is run once on the working tree to record what it sends.
+  and present. The suite is run once on the working tree to record what it sends. A test
+  marked `cost` is left out: its input is slow on purpose for a scan that is not linear, so an
+  old tree would take minutes over each one, and what such a test compares is the cost, which
+  it does itself.
 - `sweep`: the cost of a run made of one short unit, doubled until it takes long enough that
   a per-call cost cannot hide the term being looked for. The verdict is read from the last
-  doubling, best of two.
+  doubling, best of two, and a ratio above 3 is measured again, best of five, before it is
+  reported.
 - `defang`: the defanged forms of the known defect and of the paths it shares, as read.
+- `shapes`: the cost of named inputs that the sweep's units do not build, at three sizes.
 
 Each of `layer1` and `layer2` prints a positive control: the same comparison with one input
 changed, which must show as exactly that input.
@@ -139,6 +145,13 @@ def layer1_strings(seed: int = 22) -> list[str]:
     words = ["word", "a", "=?a", "x.example.net", "a.b", "u@example.org", "192.0.2.7", "a-b"]
     for word, white in itertools.product(words, WHITE):
         strings.append((word + white) * 50)
+    # Short strings, dense with what decides where a candidate starts and ends: anchors, marks,
+    # word characters outside ASCII, white space of every kind.
+    dense = [*"aAzZ19._-+:@/?#=&%~!*'\"()[]{}<>,;|`^$_", chr(0xE9), chr(0xDF), chr(0x661)]
+    dense += [*WHITE, "..", "//", "://", "@a.b", "a.b", "[.]", "[at]", "hxxp", "www.", "mailto:"]
+    dense += ["x.co", "::", "1.2.3.4", "d41d8cd98f00b204e9800998ecf8427e"]
+    for _ in range(30_000):
+        strings.append("".join(rng.choice(dense) for _ in range(rng.randint(1, 30))))
     return strings
 
 
@@ -252,9 +265,9 @@ def _task_sweep(payload: dict[str, Any]) -> list[list[Any]]:
     registries = Registries.load()
     source = Source(kind="body_text", part_index=0)
 
-    def cost(text: str) -> float:
+    def cost(text: str, tries: int = 2) -> float:
         best = float("inf")
-        for _ in range(2):
+        for _ in range(tries):
             collector = Collector(registries)
             started = time.perf_counter()
             collector.feed_text(text, source)
@@ -271,6 +284,11 @@ def _task_sweep(payload: dict[str, Any]) -> list[list[Any]]:
             if done and len(rows) >= 2:
                 break
             size *= 2
+        # A ratio above 3 from two tries each is confirmed with five before it is reported:
+        # at a few hundredths of a second, one slow pair of tries reads as a square.
+        if rows[-1][1] / max(rows[-2][1], 1e-9) > 3.0:
+            for row in rows[-2:]:
+                row[1] = cost((unit * (row[0] // len(unit) + 1))[: row[0]], tries=5)
         out.append([unit, rows])
     return out
 
@@ -349,15 +367,26 @@ def _record_suite() -> dict[str, bytes]:
     import pytest
 
     recorded: dict[str, bytes] = {}
+    left_out: set[str] = set()
 
     class Recorder:
+        in_cost_test = False
+
+        def pytest_runtest_setup(self, item: Any) -> None:
+            self.in_cost_test = item.get_closest_marker("cost") is not None
+
         def pytest_configure(self, config: object) -> None:
             from mail_dissect import routes
 
             original = routes.build_response
+            recorder = self
 
             async def recording(raw: bytes, *args: Any, **kwargs: Any) -> Any:
-                recorded.setdefault(hashlib.sha256(raw).hexdigest()[:16], raw)
+                key = hashlib.sha256(raw).hexdigest()[:16]
+                if recorder.in_cost_test:
+                    left_out.add(key)
+                else:
+                    recorded.setdefault(key, raw)
                 return await original(raw, *args, **kwargs)
 
             routes.build_response = recording  # type: ignore[assignment]
@@ -368,6 +397,7 @@ def _record_suite() -> dict[str, bytes]:
         plugins=[Recorder()],
     )
     assert status == 0, f"the suite did not pass on the working tree (exit {status})"
+    print(f"  recorded {len(recorded)} messages, left out {len(left_out)} sent by cost tests")
     return recorded
 
 
@@ -471,6 +501,32 @@ def defang(rev: str) -> None:
         print(f"    {unit!r:8} {cells}")
 
 
+def _shapes() -> dict[str, str]:
+    """Inputs found worst by hand, each long enough for its largest size, and two of ordinary
+    text as the control: what a change to the grammar costs where nothing is hostile."""
+    noise = random.Random(19).randbytes(150_000)
+    prose = "Dear customer, your order has shipped and will arrive on Tuesday. Regards, the team. "
+    links = "See https://shop.example.com/orders/12345?ref=mail or write to help@example.net now. "
+    return {
+        "real base64, one line": base64.b64encode(noise).decode(),
+        "prose (control)": prose * 2_400,
+        "prose with links (control)": links * 2_400,
+    }
+
+
+def shapes(rev: str) -> None:
+    named = _shapes()
+    payload = {"units": list(named.values()), "start": 48_000, "enough": float("inf")}
+    payload["largest"] = 192_000
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp)
+        rows = _run(_tree(rev, work), "sweep", payload, work)
+    print(f"shapes read by {rev}, best of two:")
+    for name, (_, sizes) in zip(named, rows, strict=True):
+        cells = "  ".join(f"{size // 1000}k {seconds:.2f}s" for size, seconds in sizes)
+        print(f"  {name:24} {cells}")
+
+
 def main() -> int:
     if sys.argv[1:2] == ["--worker"]:
         _worker(*sys.argv[2:6])
@@ -484,6 +540,8 @@ def main() -> int:
         sweep(revisions[0] if revisions else ".")
     elif command == "defang":
         defang(revisions[0] if revisions else ".")
+    elif command == "shapes":
+        shapes(revisions[0] if revisions else ".")
     else:
         raise SystemExit(__doc__)
     return 0

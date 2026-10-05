@@ -48,6 +48,7 @@ addopts = "-m 'not fuzz'"
 markers = [
     "fuzz: the long fuzz run with a random seed (not part of the default suite)",
     "live: needs a real Tika or renderer container (never runs in CI)",
+    "cost: its input is slow on purpose for a scan that is not linear; the comparison in docs/research/probes/grammar.py does not replay it",
 ]
 
 [tool.mypy]

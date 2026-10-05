@@ -12,8 +12,10 @@ a sentence.
 
 from __future__ import annotations
 
+import bisect
 import ipaddress
 import re
+import string
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 
@@ -54,34 +56,40 @@ _URL_TAIL = r"[^\s<>\"'\]\),]*"
 _URL_HEAD = r"[^\s<>\"'\]\),@/]*"
 _LOCAL_PART = r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*"
 
-# The order of these alternatives IS the contract for resolving overlaps (SPEC §11.2):
-# leftmost match wins, and at the same position the earlier alternative wins.
-_MASTER = re.compile(
-    "|".join(
-        (
-            # A URI with a scheme. An opaque scheme must carry an `@` or a `/`, which is
-            #    what separates `mailto:a@example.com` from the `Note:this` in a sentence -
-            #    a structural test, not a list of schemes we happen to like.
-            rf"(?P<url_scheme>\b[A-Za-z][A-Za-z0-9+.-]*:(?://{_URL_TAIL}|{_URL_HEAD}[@/]{_URL_TAIL}))",
-            # 3. An address.
-            rf"(?P<email>\b{_LOCAL_PART}@{_HOST})",
-            # 4. A URL without a scheme: shorteners and `www.` are everyday mail content.
-            rf"(?P<url_bare>\b(?:www\.{_HOST}{_URL_TAIL}|{_HOST}/{_URL_TAIL}))",
-            # 5/6. Loose shapes, validated by a real address parser rather than by the regex.
-            r"(?P<ipv6>(?<![:.\w])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f:.]{0,45})",
-            #    [D26]: a label character (`\w`: a letter, a digit or an underscore, in any
-            #    script) next to the address rules it out, and so does one on the far side
-            #    of a period or a hyphen that touches it - the head of a host name, the tail
-            #    of a version. A period or a hyphen with anything else beyond it is
-            #    punctuation, on either side.
-            r"(?P<ipv4>(?<!\w)(?<!\w[.-])\d{1,3}(?:\.\d{1,3}){3}(?!\w|[.-]\w))",
-            # 7. A written-down digest.
-            r"(?P<hash>\b[0-9a-fA-F]{32}(?:[0-9a-fA-F]{8})?(?:[0-9a-fA-F]{24})?(?:[0-9a-fA-F]{64})?\b)",
-            # 8. A token the registries decide about: a domain, a filename, both, or neither.
-            rf"(?P<token>\b{_LABEL}(?:\.{_LABEL})+)",
-        )
+# The order of these alternatives IS the contract for resolving overlaps (SPEC §11.2): the
+# earliest match wins, and at the same position the earlier alternative wins.
+#
+# 2. A URI with a scheme. An opaque scheme must carry an `@` or a `/`, which is what separates
+#    `mailto:a@example.com` from the `Note:this` in a sentence - a structural test, not a list
+#    of schemes we happen to like.
+_URL_SCHEME = (
+    rf"(?P<url_scheme>\b[A-Za-z][A-Za-z0-9+.-]*:(?://{_URL_TAIL}|{_URL_HEAD}[@/]{_URL_TAIL}))"
+)
+# 3. An address.
+_EMAIL = rf"(?P<email>\b{_LOCAL_PART}@{_HOST})"
+_OTHERS = "|".join(
+    (
+        # 4. A URL without a scheme: shorteners and `www.` are everyday mail content.
+        rf"(?P<url_bare>\b(?:www\.{_HOST}{_URL_TAIL}|{_HOST}/{_URL_TAIL}))",
+        # 5/6. Loose shapes, validated by a real address parser rather than by the regex.
+        r"(?P<ipv6>(?<![:.\w])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f:.]{0,45})",
+        #    [D26]: a label character (`\w`: a letter, a digit or an underscore, in any
+        #    script) next to the address rules it out, and so does one on the far side
+        #    of a period or a hyphen that touches it - the head of a host name, the tail
+        #    of a version. A period or a hyphen with anything else beyond it is
+        #    punctuation, on either side.
+        r"(?P<ipv4>(?<!\w)(?<!\w[.-])\d{1,3}(?:\.\d{1,3}){3}(?!\w|[.-]\w))",
+        # 7. A written-down digest.
+        r"(?P<hash>\b[0-9a-fA-F]{32}(?:[0-9a-fA-F]{8})?(?:[0-9a-fA-F]{24})?(?:[0-9a-fA-F]{64})?\b)",
+        # 8. A token the registries decide about: a domain, a filename, both, or neither.
+        rf"(?P<token>\b{_LABEL}(?:\.{_LABEL})+)",
     )
 )
+# The whole alternation, which the defanged path matches a re-armed token against.
+_MASTER = re.compile(f"{_URL_SCHEME}|{_EMAIL}|{_OTHERS}")
+# The scan finds a URI with a scheme and an address by their anchors (`_anchored`), and the
+# rest with this.
+_REST = re.compile(_OTHERS)
 # Defanged forms are found by locating the MARKER and expanding around it, never by a
 # pattern that walks forward looking for one. Any "run of characters, then a required
 # marker" construction costs a walk back over the run at every position where there is no
@@ -344,9 +352,8 @@ def _scan(text: str) -> list[tuple[str, str]]:
         start, end = _expand(text, marker.start(), marker.end())
         # 0 = the defanged reading, which wins a tie at the same position.
         found.append((start, 0, end, "defanged", text[start:end]))
-    for match in _MASTER.finditer(text):
-        if match.lastgroup is not None:
-            found.append((match.start(), 1, match.end(), match.lastgroup, match.group()))
+    for start, end, kind in _matches(text):
+        found.append((start, 1, end, kind, text[start:end]))
 
     found.sort(key=lambda item: (item[0], item[1]))
     taken: list[tuple[str, str]] = []
@@ -357,6 +364,172 @@ def _scan(text: str) -> list[tuple[str, str]]:
         taken.append((kind, raw))
         consumed_to = end
     return taken
+
+
+def _matches(text: str) -> Iterator[tuple[int, int, str]]:
+    """The matches of the whole alternation, in order: what `_MASTER.finditer` would give.
+
+    The earliest match wins, at the same position the earlier alternative, and the next match
+    is the earliest at or after the end of the last one. A URI with a scheme comes first and an
+    address second, so each wins a tie with what follows it.
+    """
+    context = _Context(text)
+    schemes = _Anchored(context, ":", _scheme_at)
+    addresses = _Anchored(context, "@", _address_at)
+    rest = _REST.search(text)
+    position = 0
+    while True:
+        best: tuple[int, int, str] | None = None
+        scheme = schemes.find(position)
+        if scheme is not None:
+            best = (*scheme, "url_scheme")
+        address = addresses.find(position)
+        if address is not None and (best is None or address[0] < best[0]):
+            best = (*address, "email")
+        if rest is not None and rest.start() < position:
+            rest = _REST.search(text, position)
+        if rest is not None and (best is None or rest.start() < best[0]):
+            best = (rest.start(), rest.end(), rest.lastgroup or "")
+        if best is None:
+            return
+        yield best
+        position = best[1]
+
+
+# A URI with a scheme and an address may start at every word boundary of a run and read to its
+# end before they fail, so searching for them is quadratic in the length of a run that nothing
+# completes (F22). Both are built the same way: a stretch of characters that ends at one anchor,
+# `:` or `@`, and then a part that does not depend on where the stretch began. So each anchor is
+# read once, in order: where its stretch begins, which starts in the stretch the grammar admits,
+# and where the match after the anchor ends. The earliest match at or after a position is the
+# first admitted start of the first anchor that has one - what the search would find, in time
+# linear in the text. The stretch is read backwards, as a forward match on the reversed text.
+_SCHEME_CHARS = re.compile(r"[A-Za-z0-9+.-]*")
+_SCHEME_INNER_START = re.compile(r"[+.-][A-Za-z]")
+_LOCAL_REVERSED = re.compile(_LOCAL_PART)  # a dot-atom reads the same backwards
+_LOCAL_CHARS = frozenset(string.ascii_letters + string.digits + "!#$%&'*+/=?^_`{|}~-")
+_LETTERS = frozenset(string.ascii_letters)
+_BOUNDARY = re.compile(r"\b")
+_TAIL_STOP = re.compile(r"[\s<>\"'\]\),]")
+_HEAD_STOP = re.compile(r"[\s<>\"'\]\),@/]")
+_HOST_AT = re.compile(_HOST)
+
+
+class _Stop:
+    """The first position at or after `i` that `pattern` matches, or the end of the text."""
+
+    __slots__ = ("_at", "_from", "_pattern", "_text")
+
+    def __init__(self, text: str, pattern: re.Pattern[str]) -> None:
+        self._text = text
+        self._pattern = pattern
+        self._from, self._at = 1, 0  # nothing known yet
+
+    def __call__(self, i: int) -> int:
+        # Nothing matches in [_from, _at), so any `i` in that range has the same answer. The
+        # anchors are read in order, so most questions fall in the range of the last answer.
+        if self._from <= i <= self._at:
+            return self._at
+        found = self._pattern.search(self._text, i)
+        self._from, self._at = i, found.start() if found else len(self._text)
+        return self._at
+
+
+class _Context:
+    """What the readers of both anchors share, made when one of them first needs it."""
+
+    __slots__ = ("_reversed", "head_stop", "tail_stop", "text")
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self._reversed: str | None = None
+        self.tail_stop = _Stop(text, _TAIL_STOP)
+        self.head_stop = _Stop(text, _HEAD_STOP)
+
+    def stretch(self, pattern: re.Pattern[str], anchor: int) -> int:
+        """Where the longest stretch `pattern` matches, ending just before `anchor`, begins."""
+        if self._reversed is None:
+            self._reversed = self.text[::-1]
+        mirrored = len(self.text) - anchor
+        found = pattern.match(self._reversed, mirrored)
+        return anchor - (found.end() - mirrored) if found else anchor
+
+
+_Reader = Callable[[_Context, int, int], tuple[list[int], int | None]]
+
+
+class _Anchored:
+    """The earliest match of one anchored alternative at or after a position.
+
+    Positions only ever grow, so an anchor passed over is never read again, and each one is
+    read once.
+    """
+
+    __slots__ = ("_anchor", "_at", "_context", "_end", "_read", "_starts")
+
+    def __init__(self, context: _Context, anchor: str, read: _Reader) -> None:
+        self._context = context
+        self._anchor = anchor
+        self._read = read
+        self._at = context.text.find(anchor)
+        self._starts: list[int] | None = None
+        self._end: int | None = None
+
+    def find(self, position: int) -> tuple[int, int] | None:
+        while self._at != -1:
+            if self._at > position:
+                if self._starts is None:
+                    self._starts, self._end = self._read(self._context, self._at, position)
+                index = bisect.bisect_left(self._starts, position)
+                if self._end is not None and index < len(self._starts):
+                    return self._starts[index], self._end
+            self._at = self._context.text.find(self._anchor, self._at + 1)
+            self._starts = None
+        return None
+
+
+def _scheme_at(context: _Context, colon: int, position: int) -> tuple[list[int], int | None]:
+    """The admitted starts of a scheme ending at `colon`, at or after `position`, and the end.
+
+    A start is an ASCII letter at a word boundary. Inside the stretch every character is a
+    letter, a digit or one of `+.-`, so a letter is at a boundary exactly when one of those
+    three stands before it; at the first position the boundary is asked of the text itself.
+    """
+    text = context.text
+    first = max(position, context.stretch(_SCHEME_CHARS, colon))
+    starts = [m.start() + 1 for m in _SCHEME_INNER_START.finditer(text, first, colon)]
+    if first < colon and text[first] in _LETTERS and _BOUNDARY.match(text, first):
+        starts.insert(0, first)
+    if not starts:
+        return starts, None
+    if text.startswith("//", colon + 1):
+        return starts, context.tail_stop(colon + 3)
+    # The head cannot hold `@` or `/`, so it ends at the first character it cannot hold, and
+    # the opaque branch matches only if that character is one of the two.
+    head_end = context.head_stop(colon + 1)
+    if head_end < len(text) and text[head_end] in "@/":
+        return starts, context.tail_stop(head_end + 1)
+    return starts, None
+
+
+def _address_at(context: _Context, at: int, position: int) -> tuple[list[int], int | None]:
+    """The admitted starts of an address whose `@` is at `at`, at or after `position`, and
+    the end.
+
+    The local part before `@` is the longest dot-atom ending there, so a start is any character
+    of it that a local part may begin with and that stands at a word boundary.
+    """
+    text = context.text
+    first = max(position, context.stretch(_LOCAL_REVERSED, at))
+    starts = [
+        boundary.start()
+        for boundary in _BOUNDARY.finditer(text, first, at)
+        if boundary.start() < at and text[boundary.start()] in _LOCAL_CHARS
+    ]
+    if not starts:
+        return starts, None
+    host = _HOST_AT.match(text, at + 1)
+    return starts, host.end() if host else None
 
 
 def _expand(text: str, start: int, end: int) -> tuple[int, int]:
