@@ -205,3 +205,24 @@ def test_a_million_parameters_are_not_split(client: TestClient) -> None:
         "multipart/mixed"
     ]
     assert elapsed < THRESHOLD, f"took {elapsed:.1f}s"
+
+
+def test_a_nested_message_written_out_again_is_not_refolded(client: TestClient) -> None:
+    """`[D35]`: writing a nested message out again refolded every header line over 78
+    characters through the header registry, so a `Cc` of 16,000 periods inside it took five and
+    a half seconds there, growing as the square (F26). It is written as stored now. The
+    delimiters end in a bare CR, which is what sends the nested message down this path."""
+    raw = (
+        b'From: a@example.net\nContent-Type: multipart/mixed; boundary="b"\n\n'
+        b"--b\rContent-Type: text/plain\n\nouter\n"
+        b"--b\rContent-Type: message/rfc822\n\nFrom: c@example.net\nCc: "
+        + b"."
+        * 32_000
+        + b'\nContent-Type: multipart/alternative; boundary="c"\n\n'
+        b"--c\nContent-Type: text/plain\n\ninner\n--c--\n--b--\r"
+    )
+
+    body, elapsed = _timed(client, raw)
+
+    assert len(body["messages"]) == 2 and "malformed_mime" in body["flags"]
+    assert elapsed < THRESHOLD, f"took {elapsed:.1f}s"

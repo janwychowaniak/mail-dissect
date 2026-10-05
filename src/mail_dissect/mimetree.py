@@ -244,9 +244,14 @@ def _reserialise(part: Message) -> bytes:
     if not isinstance(inner, Message):
         return b""
     buffer = BytesIO()
-    # typeshed types `flatten` for EmailMessage; compat32 hands us a Message, which is what
-    # the generator has always accepted and what this fallback is for.
-    BytesGenerator(buffer, policy=SMTP).flatten(inner)  # type: ignore[arg-type]
+    # [D35]: each header is written as it is stored, never refolded. Refolding sends every line
+    # longer than 78 characters through the header registry, whose cost is its steps times
+    # what is left to read (F24), and it rewrites what the message held: this fallback is
+    # already marked `malformed_mime` for not being the original bytes, and should be as
+    # close to them as it can. typeshed types `flatten` for EmailMessage; compat32 hands us
+    # a Message, which is what the generator has always accepted.
+    policy = SMTP.clone(refold_source="none")
+    BytesGenerator(buffer, policy=policy).flatten(inner)  # type: ignore[arg-type]
     return buffer.getvalue()
 
 

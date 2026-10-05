@@ -1,0 +1,22 @@
+From: a@example.net
+To: b@example.net
+Subject: delimiters that end in a bare CR
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="b"
+
+--bContent-Type: text/plain
+
+outer
+--bContent-Type: message/rfc822
+
+From: c@example.net
+X-Long: word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word 
+Subject: inner
+Content-Type: multipart/alternative; boundary="c"
+
+--c
+Content-Type: text/plain
+
+inner.example.net
+--c--
+--b--

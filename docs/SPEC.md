@@ -780,6 +780,11 @@ silently, with no signal at all. Reassembly is byte-neutral only for input that 
 canonical; every malformed shape is normalised, and at least one (a space before the header
 colon) loses the header entirely (F1).
 
+One case falls back to writing a nested message out: when its span in the input cannot be
+verified against what the parser read — delimiters that end in a bare CR are one such input
+(F26) — the parsed message is written out with each header as it was stored, never refolded
+`[D35]`, and the response says `malformed_mime`, because these bytes are not the original.
+
 ### 13.3 Serving
 
 Downloading an artifact is **the only place where hostile material returns to a browser**, so
@@ -1331,6 +1336,15 @@ Approved by the maintainer, 2026-09-17.
   the parser's included, asks one private method of `email.message.Message`, and the service's
   messages bound that method: past the limit it answers as for a header with no parameters. A
   test in `tests/pins.py` would turn red on a Python whose readers stopped asking it.
+- **[D35] A nested message written out again is written with its headers as they were
+  stored**, never refolded (§13.2). Decided 2026-10-05, for 0.7.0. The bytes of a nested
+  message are taken from the input `[D12]`; only when its span cannot be verified is it written
+  out again from the parsed tree, and marked `malformed_mime`. Delimiters that end in a bare CR
+  are one way there, since the parser ends a line at a CR and the service's locator does not
+  (F26). The `SMTP` policy refolded every header line over 78 characters through the header
+  registry, at the registry's cost, so a `Cc` of 16,000 periods inside such a message took five
+  seconds, and it rewrote a long line that the message held whole. Written as stored, the bytes
+  are the same for short lines and closer to the original for long ones, and cost nothing.
 
 **Implementation**
 

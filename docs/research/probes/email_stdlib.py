@@ -2,7 +2,7 @@
 
 Run:  python3.13 docs/research/probes/email_stdlib.py
 
-Findings F1 to F10, F17 to F19, F21 and F23 to F25 in ../NOTES.md are produced by one function
+Findings F1 to F10, F17 to F19, F21 and F23 to F26 in ../NOTES.md are produced by one function
 each here.
 The probes are read-only, offline, and depend on nothing but the standard library, so
 anyone can re-run them against a newer interpreter and see whether a finding still
@@ -647,6 +647,41 @@ def f25_part_parameters() -> None:
         print(f"  {reader:20} asks _get_params_preserve {Counting.asked - before} time(s)")
 
 
+def f26_writing_a_message_out_again() -> None:
+    """Does a bare CR end a delimiter line, and what does writing a message out again cost?"""
+    _banner("F26", "a bare CR, and a message written out again")
+    raw = (
+        b'Content-Type: multipart/mixed; boundary="b"\n\n'
+        b"--b\rContent-Type: text/plain\n\none\n--b\rContent-Type: text/plain\n\ntwo\n--b--\r"
+    )
+    parts = message_from_bytes(raw, policy=email.policy.compat32).get_payload()
+    print(f"  delimiters ending in a bare CR: {len(parts)} parts")
+    smtp, as_stored = email.policy.SMTP, email.policy.SMTP.clone(refold_source="none")
+
+    def written(header: bytes, policy: email.policy.Policy) -> tuple[bytes, float]:
+        message = message_from_bytes(
+            header + b"\nSubject: s\n\nbody\n", policy=email.policy.compat32
+        )
+        buffer = BytesIO()
+        start = time.perf_counter()
+        BytesGenerator(buffer, policy=policy).flatten(message)
+        return buffer.getvalue(), time.perf_counter() - start
+
+    for size in (4_000, 8_000, 16_000):
+        header = b"Cc: " + b"." * size
+        _, refolded = written(header, smtp)
+        _, stored = written(header, as_stored)
+        print(f"  Cc of {size:>6} periods: refolded {refolded:.2f}s, as stored {stored:.3f}s")
+    for label, header in (
+        ("short lines", b"X-Short: one two"),
+        ("a folded header", b"X-F: one\n two"),
+        ("a line of 200 characters", b"X-Long: " + b"word " * 40),
+    ):
+        a, _ = written(header, smtp)
+        b, _ = written(header, as_stored)
+        print(f"  {label:26} refolded and as stored {'identical' if a == b else 'differ'}")
+
+
 def main() -> int:
     print(f"python {sys.version}")
     f1_nested_reserialisation_is_not_byte_identical()
@@ -666,6 +701,7 @@ def main() -> int:
     f23_html_parser_fed_in_pieces()
     f24_the_header_parser_cost()
     f25_part_parameters()
+    f26_writing_a_message_out_again()
     return 0
 
 

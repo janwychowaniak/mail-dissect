@@ -9,7 +9,7 @@ against the versions in `uv.lock`; F20 on **2026-10-01** with
 was run inside the published 0.4.0 image and on the tree that became 0.5.0; F21 on
 **2026-10-03** with `probes/email_stdlib.py`, on 3.13.12 and on 3.13.15 inside the published
 0.5.0 image; F22 on **2026-10-05** with [`probes/grammar.py`](probes/grammar.py), on 3.13.12
-against the tree of `v0.6.0`; F23 on **2026-10-05** and F24 and F25 on **2026-10-06** with
+against the tree of `v0.6.0`; F23 on **2026-10-05** and F24 to F26 on **2026-10-06** with
 `probes/email_stdlib.py`, on 3.13.12 and on 3.13.16 inside the published 0.6.0 image. Each of
 them is printed by one function in its script; re-run the script against a
 newer interpreter, dependency or release to see whether a finding still holds. The scripts are
@@ -79,6 +79,10 @@ number, as F15 was.
 - Every reader of a part header's parameters asks one private method, and splitting a header
   of a million `;` takes seconds, its boundary search as many again. Hence the bound in that
   method `[D34]`. (F25)
+- Writing a message out again with the `SMTP` policy refolds every header line over 78
+  characters through the header registry: a `Cc` of 16,000 periods takes five seconds to
+  write. With `refold_source="none"` each header is written as stored, the same bytes for short
+  lines and none of the cost. Hence `[D35]`. (F26)
 - `html.parser` fed in pieces reads a document the way it reads it fed at once only where the
   interpreter decides the end of an empty comment without looking ahead: 3.13.16 does, 3.13.12
   does not. The parse of `<!-->` itself moved between the two. Hence the HTML scan is fed once
@@ -977,3 +981,33 @@ service asks for the charset and the name on top. `get_param`, `get_params`, `ge
 on both interpreters, a subclass counting the calls. So a bound in that one private method
 bounds every reader, the parser's own included. Hence `[D34]`, and the pin in `tests/pins.py`
 that would turn red on a Python whose readers stopped asking it.
+
+---
+
+## F26 — a bare CR ends a delimiter line, and writing a message out again refolds it
+
+Probed with `f26_writing_a_message_out_again` in `probes/email_stdlib.py` on 3.13.12 and on
+3.13.16 inside the published 0.6.0 image.
+
+**A delimiter line ending in a bare CR closes a part for the parser.** A multipart whose
+delimiters end in `\r` alone parses into its two parts on both interpreters. The service
+locates a nested message's bytes by its own reading of delimiter lines, which ends them at a
+line feed, so for such a message the two readings disagree, the span is not verified, and the
+nested message is written out again from the parsed tree — the one path that does it, marked
+`malformed_mime` because the bytes are not the original `[D12]`. The saved message
+`tests/regressions/2026-10-06-delimiters-that-end-in-a-bare-cr.eml` takes it; the same message
+with a line feed after each delimiter does not.
+
+**Writing it out with the `SMTP` policy refolds every long header line through the header
+registry**, at the registry's cost (F24):
+
+| A header inside the nested message | refolded, 3.13.12 | refolded, 3.13.16 | as stored |
+| --- | --- | --- | --- |
+| `Cc` of 4,000 periods | 0.26 s | 0.27 s | 0.000 s |
+| `Cc` of 8,000 periods | 1.03 s | 1.07 s | 0.000 s |
+| `Cc` of 16,000 periods | 5.48 s | 5.53 s | 0.001 s |
+
+`SMTP.clone(refold_source="none")` writes each header as it was stored. The bytes are the same
+as refolded ones for short lines and for a header folded into short lines, and differ for a
+line of 200 characters, which refolding breaks up: written as stored, the nested message keeps
+what the message held. Hence `[D35]`.

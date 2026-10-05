@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import time
+from pathlib import Path
 
 import builders as b
 import pytest
@@ -15,6 +16,8 @@ from fastapi.testclient import TestClient
 
 from mail_dissect.app import create_app
 from mail_dissect.settings import Settings
+
+REGRESSIONS = Path(__file__).parent / "regressions"
 
 
 def _part(body: dict, index: int) -> dict:
@@ -418,3 +421,34 @@ def test_nesting_deeper_than_the_limit_is_partial_not_an_error(
     assert body["ok"] is True
     assert len(body["messages"]) == expected_messages
     assert ("truncated" in body["flags"]) is cut
+
+
+def test_a_nested_message_behind_bare_cr_delimiters_is_written_as_stored(
+    client: TestClient,
+) -> None:
+    """`[D35]`: when the nested message's bytes cannot be located, it is written out again,
+    and each header is written as it was stored, never refolded.
+
+    Delimiters that end in a bare CR are line breaks to the parser and not to the byte
+    locator, so this saved message is the one path that writes a nested message out again;
+    `malformed_mime` says the bytes are not the original. Refolding sent every line over 78
+    characters through the header registry and rewrote it: the line of 200 characters here
+    came back in pieces. The control is the same message with LF after each delimiter, whose
+    nested bytes are located and not written out at all.
+    """
+    raw = (REGRESSIONS / "2026-10-06-delimiters-that-end-in-a-bare-cr.eml").read_bytes()
+    long_line = b"X-Long: " + b"word " * 39 + b"word"
+
+    def nested_eml(data: bytes) -> tuple[dict, bytes]:
+        body = dissect(client, data)
+        eml = next(a for a in body["artifacts"] if a["kind"] == "eml" and a["message_index"] == 1)
+        artifact = client.get(f"/v1/artifact/{body['dissect_id']}/{eml['artifact_id']}")
+        return body, artifact.content
+
+    body, written = nested_eml(raw)
+    located, _ = nested_eml(raw.replace(b"\r", b"\n"))
+
+    assert body["flags"] == ["malformed_mime"]
+    assert located["flags"] == []
+    assert long_line in written
+    assert "inner.example.net" in [o["value"] for o in body["messages"][1]["observables"]]
