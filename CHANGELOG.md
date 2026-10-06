@@ -17,12 +17,7 @@ what the contract asks for and is marked as an expected failure, strictly: once 
 fixed the suite fails until the mark and the entry here are removed, so an entry cannot outlive
 its defect.
 
-- **A defanged form directly after a hyphen or a period is not returned** (SPEC §11.3).
-  `-host[.]example[.]net`, `-hxxp://example[.]net/x`, `-user[at]example[.]net` and
-  `-192[.]0[.]2[.]1` yield no candidate, and neither does `.host[.]example[.]net`. The same
-  forms after a space — `- host[.]example[.]net` — are re-armed and returned with
-  `defanged: true`. In every release since 0.1.0, measured on the published images.
-  Saved as `2026-10-01-defanged-after-a-hyphen-or-a-period.eml`.
+None at the moment.
 
 ## 0.6.0 — 2026-10-04
 

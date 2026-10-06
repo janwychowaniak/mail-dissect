@@ -354,6 +354,13 @@ The full record is `docs/SPEC.md` §22. The ones most likely to be "improved" by
   written exactly. `extension` comes from the last path component. And `headers{}` stays the
   parser's view `[D24]`: making it agree with the name is the same regression as restoring a
   value as written.
+- **[D28]** a defanged form is read by re-arming its whole unit and reading the result with the
+  grammar everything else is read with; nothing is grown outwards from a marker. Growing a
+  token over a set of characters looks cheaper and more local, and it lost every form after a
+  hyphen, a period or a bracket, cut what the set did not reach, and cost seconds on a run of
+  markers (F22) — a wider set only moves the edge. A scheme is re-armed only where a scheme
+  stands, so `fxp[.]example[.]net` stays a host, and a bracket form only in the table's case;
+  being generous with either reads a defanged form into text that holds none.
 - **[D15]** HTML is parsed with the standard library; do not reach for `lxml` for "robustness".
 - **[D37]** the entry limits are per response and per list. Per message looks fairer and lets
   nesting multiply them; one pool for all lists looks simpler and lets the links and resources,

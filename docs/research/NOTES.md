@@ -697,7 +697,8 @@ lies inside a longer match of another alternative — a token that starts at the
 starts at the left end — and in the third the left end is returned by the IPv6 grammar, which
 does not look at what follows it.
 
-**The defanged path loses a candidate that follows a hyphen or a period**, in every grammar:
+**The defanged path lost a candidate that followed a hyphen or a period**, in every grammar,
+until 0.7.0:
 
 | Written | Returned |
 | --- | --- |
@@ -706,12 +707,12 @@ does not look at what follows it.
 | `-host[.]example[.]net`, `.host[.]example[.]net` | nothing |
 | `-hxxp://example[.]net/x`, `-user[at]example[.]net`, `-192[.]0[.]2[.]1` | nothing |
 
-A defanged form is found by growing its marker outwards to the token that contains it, and a
-hyphen or a period in front is taken along as part of that token; re-armed, the token no longer
-reads as anything. The same text without the defanging is returned. This is a different
-mechanism from the one above and `[D26]` does not touch it: it is a known defect, listed in
-`CHANGELOG.md` and stated by `tests/test_known_defects.py`. F22 measures the mechanism on its
-own, and what else it cuts, distorts and costs.
+A defanged form was found by growing its marker outwards to the token that contained it, and a
+hyphen or a period in front was taken along as part of that token; re-armed, the token no longer
+read as anything. The same text without the defanging was returned. This is a different
+mechanism from the one above and `[D26]` does not touch it: it was a known defect, listed in
+`CHANGELOG.md` and stated by `tests/test_known_defects.py` until `[D28]` fixed it in 0.7.0. F22
+measures the mechanism on its own, what else it cut, distorted and cost, and what replaced it.
 
 ## F21 — a filename read by three grammars, and which one moved
 
@@ -869,6 +870,35 @@ before, `layer2` 0 of 1,212. The control, ordinary text at 192k characters, read
 prose against 0.11 s on 0.6.0 and 0.18 s for prose dense with links against 0.13 s; the same
 inputs read 0.09 against 0.14 and 0.23 against 0.19 in the run of the previous change, so the
 direction holds and the size moves by a third between runs.
+
+**After re-arming the unit (0.7.0, `[D28]`).** `defang .` reads each form of the table above as
+the same text written plainly reads: after a hyphen, a period, a bracket or a colon the form
+comes back, `defanged`; `…/p?q=1&r=2`, `…/~user` and `first.last+tag@…` come back whole;
+`bücher[.]de` gives nothing, as `bücher.de` does; and `one.example.com(two[.]example[.]net)`
+gives both domains, the first without `defanged`. A run of markers costs what the plain run
+costs: 0.02, 0.04 and 0.09 s for 50k, 100k and 200k characters of `a[.]`, against 0.01, 0.03
+and 0.06 s for `a.`, and 8.52, 16.61 and 33.76 s for `a[.]` on `v0.6.0` in the same run.
+`sweep .` counts none of the 1,690 units. The slowest at its last size is `http://é&[dot]|`,
+9.30 µs a character at 32,000 and linear, and its plain twin `http://é&.|` costs as much or
+more, 10.3 against 7.7 µs a character from 16k to 64k, best of three: the cost of a URL with a
+host to convert every eleven characters, not of the marker.
+
+`layer1` against the tree before the change: 13,879 of 38,408 strings differ, each holding a
+marker or a defanged scheme. `twins` classifies all of them, and the strings that do not differ
+too: for every string, what this tree reads equals what the tree before reads from its plain
+twin, the string with each marker replaced, once a URL's defanged scheme is re-armed;
+`value_raw` re-arms to the twin's; and `defanged` is set exactly where `value_raw` holds a
+marker or begins with a defanged scheme. 0 of the 38,408 fail, and its control 1 of 1. With the
+scheme compared without its colon, or `value_raw` ending where the match ended rather than where
+trimming did, 55 and 1,022 fail. On 3.13.16, in the 0.6.0 image, both trees read each of the
+38,408 strings as they read it on 3.13.12, so the 13,879 differences are the same there.
+`layer2`: 38 of 1,434 responses differ, 19 messages in both modes, and each is an input written
+to show the change — the saved message of the defect and the cases of `test_defanged`; the
+suite's other defanged forms and the golden samples read as before, and the control is 2 of 2.
+A marker for a period at the end is left off with the period: `www.x.co[.]` and
+`http://a.example.net/x[.]` give `www.x.co` and `http://a.example.net/x`, not `defanged`, where
+0.6.0 gave both `defanged` with the marker in `value_raw`, and the second with its period,
+`…/x.`.
 
 ---
 

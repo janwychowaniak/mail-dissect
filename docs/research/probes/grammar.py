@@ -4,6 +4,7 @@ Run, from the repository root:
 
     uv run python docs/research/probes/grammar.py layer1 <old> [<new>]
     uv run python docs/research/probes/grammar.py layer2 <old> [<new>]
+    uv run python docs/research/probes/grammar.py twins <old> [<new>]
     uv run python docs/research/probes/grammar.py sweep [<rev>]
     uv run python docs/research/probes/grammar.py defang [<rev>]
     uv run python docs/research/probes/grammar.py shapes [<rev>]
@@ -25,11 +26,17 @@ never quietly be a tree against itself.
   marked `cost` is left out: its input is slow on purpose for a scan that is not linear, so an
   old tree would take minutes over each one, and what such a test compares is the cost, which
   it does itself.
+- `twins`: `[D28]` on `layer1`'s strings: what <new> reads from each string against what
+  <old> reads from its plain twin, the string with each marker replaced. They must agree once a
+  URL's defanged scheme is re-armed, with `value_raw` re-arming to the twin's and `defanged`
+  set exactly where `value_raw` holds a marker or begins with a defanged scheme. <old> is a
+  tree from before `[D28]`, whose grammar reads the plain text as <new>'s does.
 - `sweep`: the cost of a run made of one short unit, doubled until it takes long enough that
   a per-call cost cannot hide the term being looked for. The verdict is read from the last
   doubling, best of two, and a ratio above 3 is measured again, best of five, before it is
   reported.
-- `defang`: the defanged forms of the known defect and of the paths it shares, as read.
+- `defang`: the defanged forms of the defect `[D28]` fixed, of the paths it shared and of the
+  rules `[D28]` states, as read, and the cost of a run of markers.
 - `shapes`: the cost of named inputs that the sweep's units do not build, at three sizes:
   real base64, a URL followed by a long tail of each character trimming takes off, and two
   kinds of ordinary text as the control.
@@ -37,8 +44,8 @@ never quietly be a tree against itself.
   in CSS `url(`, a `Received` field, `Authentication-Results` parameters, and one value listed
   in many places.
 
-Each of `layer1` and `layer2` prints a positive control: the same comparison with one input
-changed, which must show as exactly that input.
+Each of `layer1`, `layer2` and `twins` prints a positive control: the same comparison with
+one input changed, which must show as exactly that input.
 
 Read-only and offline: nothing is sent anywhere, and the files written are in a temporary
 directory.
@@ -52,6 +59,7 @@ import itertools
 import json
 import os
 import random
+import re
 import subprocess
 import sys
 import tempfile
@@ -284,8 +292,9 @@ def sweep_units() -> list[str]:
     return list(dict.fromkeys(units))
 
 
-# The forms of the known defect, the same forms after a space, and the shapes the defanged
-# path shares with them: a token grown over characters a mark stands next to.
+# The forms of the defect `[D28]` fixed, the same forms after a space, the shapes the old path
+# shared with them - a token grown over characters a mark stands next to - and the rules of
+# `[D28]`: where a scheme is re-armed, the case of a marker, and a range.
 DEFANG_CASES = [
     "-one[.]example[.]net",
     "- one[.]example[.]net",
@@ -301,6 +310,13 @@ DEFANG_CASES = [
     "x first.last+tag[at]three[.]example[.]net y",
     f"x b{chr(0xFC)}cher[.]de y",
     "x one.example.com(two[.]example[.]net) y",
+    "x hxxp://example.net/x y",
+    "x HXXPS://a[.]example[.]net/ y",
+    "x fxp[.]example[.]net y",
+    "x x-hxxp://a[.]example[.]net y",
+    "x user[AT]three[.]example[.]net y",
+    "x 192[.]0[.]2[.]1...192[.]0[.]2[.]9 y",
+    "x www.x.co[.] y",
 ]
 
 
@@ -532,6 +548,62 @@ def layer1(old: str, new: str) -> None:
             print(f"  {href!r}\n    old {a}\n    new {b}")
 
 
+MARKER = re.compile(r"\[\.\]|\(\.\)|\{\.\}|\[dot\]|\(dot\)|\[:\]|\[at\]|\(at\)|\[@\]")
+REPLACEMENT = {"[.]": ".", "(.)": ".", "{.}": ".", "[dot]": ".", "(dot)": "."}
+REPLACEMENT |= {"[:]": ":", "[at]": "@", "(at)": "@", "[@]": "@"}
+DEFANGED_SCHEME = re.compile(r"(hxxps|hxxp|fxp):", re.IGNORECASE)
+SCHEME = {"hxxps": "https", "hxxp": "http", "fxp": "ftp"}
+
+
+def _plain(text: str) -> str:
+    return MARKER.sub(lambda m: REPLACEMENT[m.group()], text)
+
+
+def _as_plain(candidate: list[Any]) -> list[Any]:
+    """A candidate of <new> with `value_raw` re-armed and `defanged` taken off, or [] where
+    `defanged` is not set exactly where something was re-armed."""
+    value, raw, kind, subtype, defanged, *rest = candidate
+    if defanged != bool(MARKER.search(raw) or DEFANGED_SCHEME.match(raw)):
+        return []
+    return [value, _plain(raw), kind, subtype, False, *rest]
+
+
+def _scheme_rearmed(candidate: list[Any]) -> list[Any]:
+    """A candidate of <old> read from a plain twin, with a URL's defanged scheme re-armed."""
+    value, *rest = candidate
+    written = DEFANGED_SCHEME.match(value)
+    if rest[1] == "url" and written:
+        value = SCHEME[written.group(1).lower()] + value[len(written.group(1)) :]
+    return [value, *rest]
+
+
+def twins(old: str, new: str) -> None:
+    strings = layer1_strings()
+    plain = [_plain(text) for text in strings]
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp)
+        old_out = _run(_tree(old, work), "scan", plain, work)
+        new_out = _run(_tree(new, work), "scan", strings, work)
+    twin = [[_scheme_rearmed(c) for c in result["candidates"]] for result in old_out]
+    read = [[_as_plain(c) for c in result["candidates"]] for result in new_out]
+    labels = [repr(s[:80]) for s in strings]
+    fail = _compare(labels, twin, read)
+    held = sum(1 for s in strings if MARKER.search(s) or DEFANGED_SCHEME.search(s))
+    print(
+        f"twins, {new} against the plain twins read by {old}: {len(strings)} strings, {held} "
+        f"holding a marker or a defanged scheme, {len(fail)} fail"
+    )
+    shown = [(t, a, b) for t, a, b in zip(strings, twin, read, strict=True) if a != b]
+    for text, a, b in shown[:20]:
+        print(f"  {text[:80]!r}\n    twin {a}\n    new  {b}")
+    # The control: one candidate of <new> marked `defanged` the other way round.
+    index = next(i for i, result in enumerate(new_out) if result["candidates"])
+    changed = [[list(c) for c in result["candidates"]] for result in new_out]
+    changed[index][0][4] = not changed[index][0][4]
+    control = _compare(labels, twin, [[_as_plain(c) for c in result] for result in changed])
+    print(f"  control, one candidate changed: {len(control)} fail ({control})")
+
+
 def _record_suite() -> dict[str, bytes]:
     """Every message the suite sends to `/v1/dissect`, recorded on the working tree."""
     import pytest
@@ -742,9 +814,9 @@ def main() -> int:
         return 0
     command, *revisions = sys.argv[1:]
     print(f"python {sys.version.split()[0]}")
-    if command in ("layer1", "layer2"):
+    if command in ("layer1", "layer2", "twins"):
         old, new = revisions[0], revisions[1] if len(revisions) > 1 else "."
-        (layer1 if command == "layer1" else layer2)(old, new)
+        {"layer1": layer1, "layer2": layer2, "twins": twins}[command](old, new)
     elif command == "sweep":
         sweep(revisions[0] if revisions else ".")
     elif command == "defang":

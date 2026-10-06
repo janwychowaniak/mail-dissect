@@ -58,6 +58,24 @@ def _timed(client: TestClient, raw: bytes) -> tuple[dict, float]:
     return body, time.perf_counter() - started
 
 
+def test_a_run_of_markers_is_read_in_linear_time(client: TestClient) -> None:
+    """F22: each marker was grown outwards to its token, so 200,000 characters of `a[.]` took
+    about 30 seconds on 0.6.0. They are re-armed once now `[D28]`, and read like `a.a.a`.
+
+    The run is under `MAX_RUN_LENGTH`, and the defanged form after it comes back, so the
+    markers reached the scan."""
+    run = "a[.]" * 50_000
+    assert len(run) < 262_144
+    raw = b.message({"Subject": "s"}, body=f"{run} one[.]example[.]net".encode())
+
+    body, elapsed = _timed(client, raw)
+
+    assert body["flags"] == []
+    found = [(o["value"], o["defanged"]) for o in body["messages"][0]["observables"]]
+    assert found == [("one.example.net", True)]
+    assert elapsed < THRESHOLD, f"took {elapsed:.1f}s"
+
+
 def test_a_long_tail_of_closers_is_trimmed_in_linear_time(client: TestClient) -> None:
     """F22: trimming took a character off at a time, copying the rest and counting the
     brackets again, so a URL followed by 192,000 `}` took about 53 seconds. Here the tail is

@@ -602,16 +602,16 @@ a run longer than `MAX_RUN_LENGTH` is skipped without changing what the rest of 
 reading `user (at) example (dot) net` as one form, say — would quietly break all three.
 
 ```
-1 defanged form     2 url with scheme   3 email   4 schemeless url
-5 ipv6              6 ipv4              7 hash    8 registry-gated token (domain / filename)
+1 url with scheme   2 email   3 schemeless url   4 ipv6
+5 ipv4              6 hash    7 registry-gated token (domain / filename)
 ```
 
-**The defanged form is matched first, and that ordering is load-bearing.** `hxxp:` is a
-syntactically valid scheme, so a URL alternative placed ahead of it swallows
-`hxxp://zly[.]host` and returns a broken address instead of a re-armed one. A URI with a
-scheme comes second, and an opaque one is required to carry an `@` or a `/` — the structural
-test that separates `mailto:a@example.com` from the `Note:this` of an ordinary sentence,
-without a list of schemes we happen to approve of.
+**A defanged form is not an alternative of its own.** Its unit is re-armed before the grammar
+reads anything `[D28]` (§11.3), so `hxxp://zly[.]host` is read as the URL with a scheme it
+stands for, wherever that URL would be found. A URI with a scheme comes first, and an opaque
+one is required to carry an `@` or a `/` — the structural test that separates
+`mailto:a@example.com` from the `Note:this` of an ordinary sentence, without a list of schemes
+we happen to approve of.
 
 IPs are matched loosely and validated with a real IP parser. Trailing punctuation is trimmed
 from URLs by a fixed rule: characters come off the end while each is one of `.,;:!?"'`, or a
@@ -646,7 +646,14 @@ the rest of a name by two hyphens, `192.0.2.1--static.example.net`: a candidate,
   original, and `defanged: true` says the difference comes **from re-arming, not from
   normalisation**. Closed table: `hxxp`→`http`, `hxxps`→`https`, `fxp`→`ftp`,
   `[.]`/`(.)`/`{.}`/`[dot]`/`(dot)`→`.`, `[:]`→`:`, `[at]`/`(at)`/`[@]`→`@`. Defanging never
-  sets `ambiguous`.
+  sets `ambiguous`. A bracket form is a marker only as the table writes it — `[AT]` and
+  `[DOT]` are text — and it is re-armed wherever it stands. A scheme is re-armed only where a
+  URL's scheme stands, the whole of it before its colon and in any case, with a bracket marker
+  elsewhere in the URL or without one: `hxxp://example.net/x` is `http://example.net/x`,
+  `defanged`, while `fxp[.]example[.]net` is the host `fxp.example.net`, and
+  `x-hxxp://a[.]example[.]net` keeps the scheme `x-hxxp`. A candidate is `defanged` when its
+  range holds what was re-armed, and `value_raw` is that range as written; otherwise the text
+  reads exactly as it would with each marker written as what it stands for `[D28]`.
 - **A `domain`/`filename` collision yields two entries with `ambiguous: true`.** `raport.zip`
   and `README.md` satisfy both grammars, because `zip` and `md` are simultaneously public
   suffixes and file extensions. The service does not guess: it emits both candidates and flags
@@ -1279,8 +1286,9 @@ Approved by the maintainer, 2026-09-17.
   and left as they were:** a range whose ends carry a port or a prefix length, or whose left
   end is an IPv4-mapped IPv6 address, returns its left end only (`a:80-b:80`, `a/32-b/32`,
   `::ffff:a-b`); a period directly before an IPv6 address still rules that address out; and a
-  defanged form directly after a hyphen or a period is not returned in any grammar — a defect
-  of the defanged path, listed as one in `CHANGELOG.md`, and no part of this decision.
+  defanged form directly after a hyphen or a period was not returned in any grammar — a defect
+  of the defanged path, listed as one in `CHANGELOG.md` until `[D28]` fixed it in 0.7.0, and no
+  part of this decision.
 - **[D27] A part's name is read by one rule, which says what the result is.** `filename`, or
   `name` where it is missing; the RFC 2231 form wins wherever it stands; the plain form is
   read as unstructured text, losing the white space between two adjacent encoded-words and
@@ -1304,6 +1312,33 @@ Approved by the maintainer, 2026-09-17.
   encoded-word — it was decoded a second time; an unreadable charset form beside a plain one —
   it now raises the flag; white space at the ends of a decoded name — it was kept; and
   `extension` of a name that starts with a period — `.profile` had `profile`.
+- **[D28] A defanged form is read as the text it stands for, and marked where re-arming made
+  the difference** (§11.3). Every bracket marker of the table in a unit is replaced by what it
+  stands for before the grammar reads anything, and the result is read by the same grammar as
+  any other text. Only where each replacement stands is kept, not a position for every
+  character, so a unit of megabytes costs no map of megabytes, and a unit without a marker is
+  read as it is. A candidate whose range holds a replacement is `defanged`, and its `value_raw`
+  is that range as written, without the character before it or the punctuation trimmed after
+  it, as for any candidate; a marker for a period at the end is left off with the period it
+  stands for, so `www.x.co[.]` gives `www.x.co`, as written and not `defanged`. A scheme of the
+  table is re-armed where the grammar reads a scheme,
+  at the start of a URL with one: the whole scheme before its colon, in any case, since a
+  scheme is case-insensitive (RFC 3986 §3.1), with or without a bracket marker elsewhere in the
+  URL, and the URL is then `defanged`. Elsewhere the same letters are text: `fxp[.]example[.]net`
+  is the host `fxp.example.net`, and `x-hxxp://a[.]example[.]net` has the scheme `x-hxxp` and
+  only its host re-armed. A bracket form is a marker only as the table writes it, so `[AT]` and
+  `[DOT]` are text, and `user[AT]three[.]example[.]net` gives its domain alone, as the same text
+  with `.` for each `[.]` does. The run limit `[D29]` counts the text as written. Decided
+  2026-10-05, for 0.7.0, after a report that a defanged form directly after a hyphen or a period
+  was not returned. Until then each marker was grown outwards over a fixed set of characters
+  into a token that then had to be one candidate whole. A hyphen, a period, a bracket or a
+  colon in front was taken into the token, and the token was nothing; a character outside the
+  set ended the token inside a candidate, which was cut, `…/p` for `…/p?q=1&r=2`, or read as
+  another one, `tag@…` for `first.last+tag@…` and `cher.de` for `bücher.de`; and every marker
+  was grown, so a run of them cost seconds (F22). Text around a marker is now read as it would
+  be without one, and a candidate that holds no marker is an ordinary one, exactly as the plain
+  text gives it, so one rule holds for both spellings of the same text; growing over a wider
+  set would only have moved the edge where it does not.
 - **[D29] A run of more than `MAX_RUN_LENGTH` = 262,144 non-white-space characters is skipped
   whole by the scan, and the response says `truncated`** (§15). Decided 2026-10-05, for 0.7.0.
   The grammar's cost grows with the length of a run, and a sender controls that length

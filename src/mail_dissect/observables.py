@@ -23,8 +23,9 @@ from .models import ObservableSubtype, ObservableType, SourceKind
 from .registries import MAX_HOST_LENGTH, Registries
 from .urls import UrlParts, canonical_host, split
 
-# SPEC §11.3: the closed defang table. Matched in its WRITTEN form, never by rewriting the
-# text first - rewriting would destroy the offsets that first-occurrence ordering depends on.
+# SPEC §11.3: the closed defang table. A unit is rewritten with it before the grammar reads it,
+# and where each replacement stands is kept, so that `value_raw` and the order of first
+# occurrence are those of the text as written [D28].
 _DEFANG_REPLACEMENTS: tuple[tuple[str, str], ...] = (
     ("[.]", "."),
     ("(.)", "."),
@@ -72,20 +73,20 @@ _LOCAL_PART = r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~
 # The order of these alternatives IS the contract for resolving overlaps (SPEC §11.2): the
 # earliest match wins, and at the same position the earlier alternative wins.
 #
-# 2. A URI with a scheme. An opaque scheme must carry an `@` or a `/`, which is what separates
+# 1. A URI with a scheme. An opaque scheme must carry an `@` or a `/`, which is what separates
 #    `mailto:a@example.com` from the `Note:this` in a sentence - a structural test, not a list
 #    of schemes we happen to like.
 _URL_SCHEME = (
     rf"(?P<url_scheme>\b[A-Za-z][A-Za-z0-9+.-]*:"
     rf"(?://{_URL_AUTH}{_URL_PATH}|{_URL_HEAD}[@/]{_URL_OPAQUE}))"
 )
-# 3. An address.
+# 2. An address.
 _EMAIL = rf"(?P<email>\b{_LOCAL_PART}@{_HOST})"
 _OTHERS = "|".join(
     (
-        # 4. A URL without a scheme: shorteners and `www.` are everyday mail content.
+        # 3. A URL without a scheme: shorteners and `www.` are everyday mail content.
         rf"(?P<url_bare>\b(?:www\.{_HOST}(?::\d*)?{_URL_PATH}|{_HOST}/{_URL_PCHAR}*))",
-        # 5/6. Loose shapes, validated by a real address parser rather than by the regex.
+        # 4/5. Loose shapes, validated by a real address parser rather than by the regex.
         r"(?P<ipv6>(?<![:.\w])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f:.]{0,45})",
         #    [D26]: a label character (`\w`: a letter, a digit or an underscore, in any
         #    script) next to the address rules it out, and so does one on the far side
@@ -93,27 +94,25 @@ _OTHERS = "|".join(
         #    of a version. A period or a hyphen with anything else beyond it is
         #    punctuation, on either side.
         r"(?P<ipv4>(?<!\w)(?<!\w[.-])\d{1,3}(?:\.\d{1,3}){3}(?!\w|[.-]\w))",
-        # 7. A written-down digest.
+        # 6. A written-down digest.
         r"(?P<hash>\b[0-9a-fA-F]{32}(?:[0-9a-fA-F]{8})?(?:[0-9a-fA-F]{24})?(?:[0-9a-fA-F]{64})?\b)",
-        # 8. A token the registries decide about: a domain, a filename, both, or neither.
+        # 7. A token the registries decide about: a domain, a filename, both, or neither.
         rf"(?P<token>\b{_LABEL}(?:\.{_LABEL})+)",
     )
 )
-# The whole alternation, which the defanged path matches a re-armed token against.
+# The whole alternation: what `_matches` reads, written as one pattern, against which the test
+# of exact rewrites compares it.
 _MASTER = re.compile(f"{_URL_SCHEME}|{_EMAIL}|{_OTHERS}")
 # The scan finds a URI with a scheme and an address by their anchors (`_anchored`), and the
 # rest with this.
 _REST = re.compile(_OTHERS)
-# Defanged forms are found by locating the MARKER and expanding around it, never by a
-# pattern that walks forward looking for one. Any "run of characters, then a required
-# marker" construction costs a walk back over the run at every position where there is no
-# marker - quadratic on the long unbroken runs mail is full of, and measurably so: 154
-# seconds for 200 kB before this was restructured.
+# [D28]: a defanged form is read by re-arming the whole unit first - every bracket marker
+# replaced by what it stands for - and reading the result with the same grammar as any other
+# text. A candidate whose range holds a marker is `defanged`, and its `value_raw` is that range
+# as it was written. Markers are written in the table's case only; a scheme is re-armed at the
+# start of a URL with a scheme, in any case.
 _MARKER_SEARCH = re.compile(r"\[\.\]|\(\.\)|\{\.\}|\[dot\]|\(dot\)|\[:\]|\[at\]|\(at\)|\[@\]")
-_DEFANG_TOKEN_CHARS = frozenset(
-    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789[](){}@:._/-"
-)
-_MAX_DEFANG_TOKEN = 2048
+_REPLACEMENT = dict(_DEFANG_REPLACEMENTS)
 
 # A text is scanned in chunks, and the deadline is asked between them `[D10]`. A chunk ends
 # just before a white-space character, and no candidate contains one, so the chunks give
@@ -229,18 +228,16 @@ class Collector:
     def feed_text(self, text: str, source: Source) -> None:
         """Scan a blob; overlapping matches are resolved once, in document order.
 
-        Leftmost wins, and at the same position the defanged reading wins — `hxxp:` is a
-        syntactically valid scheme, so the URL grammar would otherwise swallow
-        `hxxp://zly[.]host` and hand back a broken address.
+        A defanged form is read as the form it stands for, re-armed with the rest of its unit
+        before the grammar reads anything `[D28]`, so it is found where the form itself would
+        be, after a hyphen, a period or a parenthesis alike.
         """
         for chunk in _chunks(text):
             if self._stop():
                 return
             for piece in self._without_long_runs(chunk):
-                for kind, raw in _scan(piece):
-                    trimmed = _trim(raw)
-                    if trimmed:
-                        self._classify(kind, trimmed, source)
+                for kind, value, raw, defanged in _readings(piece):
+                    self._classify(kind, value, raw, source, defanged=defanged)
 
     def feed_url(self, href: str, source: Source) -> None:
         """An address taken from an anchor or a resource, which needs no grammar to find."""
@@ -283,47 +280,26 @@ class Collector:
         return pieces
 
     # -- classification ----------------------------------------------------------------
-    def _classify(self, kind: str, raw: str, source: Source) -> None:
-        if kind == "defanged":
-            self._classify_defanged(raw, source)
-        elif kind in ("url_scheme", "url_bare"):
-            value = _canonical_url(raw)
-            self._emit(value, raw, "url", source)
-            self._fan_out_url(value, raw, source, defanged=False)
-        elif kind == "email":
-            self._emit_email(raw, raw, source, defanged=False)
-        elif kind == "ipv4" or kind == "ipv6":
-            address = _valid_ip(raw)
-            if address is not None:
-                self._emit(address[0], raw, "ip", source, subtype=address[1])
-        elif kind == "hash":
-            subtype = _HASH_SUBTYPES.get(len(raw))
-            if subtype is not None:
-                self._emit(raw.lower(), raw, "hash", source, subtype=subtype)
-        elif kind == "token":
-            self._classify_token(raw, raw, source, defanged=False)
-
-    def _classify_defanged(self, raw: str, source: Source) -> None:
-        """Re-arm, then re-classify. `defanged` says the difference comes from re-arming."""
-        rearmed = _rearm(raw)
-        if rearmed == raw:
-            return
-        match = _MASTER.fullmatch(rearmed)
-        if match is None or match.lastgroup in (None, "defanged"):
-            return
-        kind = match.lastgroup
+    def _classify(
+        self, kind: str, value: str, raw: str, source: Source, *, defanged: bool = False
+    ) -> None:
+        """One reading: `value` is what it stands for, `raw` how it was written."""
         if kind in ("url_scheme", "url_bare"):
-            value = _canonical_url(rearmed)
-            self._emit(value, raw, "url", source, defanged=True)
-            self._fan_out_url(value, raw, source, defanged=True)
+            url = _canonical_url(value)
+            self._emit(url, raw, "url", source, defanged=defanged)
+            self._fan_out_url(url, raw, source, defanged=defanged)
         elif kind == "email":
-            self._emit_email(rearmed, raw, source, defanged=True)
-        elif kind == "token":
-            self._classify_token(rearmed, raw, source, defanged=True)
-        elif kind in ("ipv4", "ipv6"):
-            address = _valid_ip(rearmed)
+            self._emit_email(value, raw, source, defanged=defanged)
+        elif kind == "ipv4" or kind == "ipv6":
+            address = _valid_ip(value)
             if address is not None:
-                self._emit(address[0], raw, "ip", source, subtype=address[1], defanged=True)
+                self._emit(address[0], raw, "ip", source, subtype=address[1], defanged=defanged)
+        elif kind == "hash":
+            subtype = _HASH_SUBTYPES.get(len(value))
+            if subtype is not None:
+                self._emit(value.lower(), raw, "hash", source, subtype=subtype, defanged=defanged)
+        elif kind == "token":
+            self._classify_token(value, raw, source, defanged=defanged)
 
     def _classify_token(self, token: str, raw: str, source: Source, *, defanged: bool) -> None:
         """The registry gate, and the one collision that sets `ambiguous` (SPEC §11.3)."""
@@ -427,24 +403,72 @@ def _chunks(text: str) -> Iterator[str]:
 
 
 def _scan(text: str) -> list[tuple[str, str]]:
-    """Every candidate span in document order, with overlaps resolved."""
-    found: list[tuple[int, int, int, str, str]] = []
-    for marker in _MARKER_SEARCH.finditer(text):
-        start, end = _expand(text, marker.start(), marker.end())
-        # 0 = the defanged reading, which wins a tie at the same position.
-        found.append((start, 0, end, "defanged", text[start:end]))
-    for start, end, kind in _matches(text):
-        found.append((start, 1, end, kind, text[start:end]))
+    """Every span the grammar takes, in document order, as written: kind and text."""
+    armed, marks, removed = _armed(text)
+    return [
+        (kind, text[_written(start, marks, removed) : _written(end, marks, removed)])
+        for start, end, kind in _matches(armed)
+    ]
 
-    found.sort(key=lambda item: (item[0], item[1]))
-    taken: list[tuple[str, str]] = []
-    consumed_to = -1
-    for start, _, end, kind, raw in found:
-        if start < consumed_to:
+
+def _readings(text: str) -> Iterator[tuple[str, str, str, bool]]:
+    """Each candidate of a unit: its kind, what it stands for, how it was written, and
+    whether re-arming made the difference `[D28]`."""
+    armed, marks, removed = _armed(text)
+    for start, end, kind in _matches(armed):
+        value = _trim(armed[start:end])
+        if not value:
             continue
-        taken.append((kind, raw))
-        consumed_to = end
-    return taken
+        end = start + len(value)
+        defanged = _holds_marker(marks, start, end)
+        if kind == "url_scheme":
+            value, rearmed = _rearm_scheme(value)
+            defanged = defanged or rearmed
+        raw = text[_written(start, marks, removed) : _written(end, marks, removed)]
+        yield kind, value, raw, defanged
+
+
+def _armed(text: str) -> tuple[str, list[int], list[int]]:
+    """The text with every bracket marker replaced, where each replacement stands in it, and
+    how many characters were removed before each.
+
+    Only the markers are remembered, not an offset for every character, which on a text of
+    megabytes would be megabytes again; a unit with no marker is handed back as it is.
+    """
+    marks: list[int] = []
+    removed = [0]
+    pieces: list[str] = []
+    last = 0
+    for marker in _MARKER_SEARCH.finditer(text):
+        pieces.append(text[last : marker.start()])
+        marks.append(marker.start() - removed[-1])
+        removed.append(removed[-1] + len(marker.group()) - 1)
+        pieces.append(_REPLACEMENT[marker.group()])
+        last = marker.end()
+    if not marks:
+        return text, marks, removed
+    pieces.append(text[last:])
+    return "".join(pieces), marks, removed
+
+
+def _written(position: int, marks: list[int], removed: list[int]) -> int:
+    """Where a position of the re-armed text stands in the text as written."""
+    return position + removed[bisect.bisect_left(marks, position)]
+
+
+def _holds_marker(marks: list[int], start: int, end: int) -> bool:
+    index = bisect.bisect_left(marks, start)
+    return index < len(marks) and marks[index] < end
+
+
+def _rearm_scheme(value: str) -> tuple[str, bool]:
+    """A defanged scheme, read where the grammar reads a scheme: the whole of it, before its
+    colon, in any case (RFC 3986 §3.1). `fxp.example.net` is a host and stays one."""
+    lowered = value.lower()
+    for written, real in _DEFANG_SCHEMES:
+        if lowered.startswith(f"{written}:"):
+            return real + value[len(written) :], True
+    return value, False
 
 
 def _matches(text: str) -> Iterator[tuple[int, int, str]]:
@@ -651,18 +675,6 @@ def _address_at(context: _Context, at: int, position: int) -> tuple[list[int], i
     return starts, host.end() if host else None
 
 
-def _expand(text: str, start: int, end: int) -> tuple[int, int]:
-    """Grow a marker outwards to the token that contains it."""
-    left = start
-    while left > 0 and text[left - 1] in _DEFANG_TOKEN_CHARS and start - left < _MAX_DEFANG_TOKEN:
-        left -= 1
-    right = end
-    length = len(text)
-    while right < length and text[right] in _DEFANG_TOKEN_CHARS and right - end < _MAX_DEFANG_TOKEN:
-        right += 1
-    return left, right
-
-
 def _trim(raw: str) -> str:
     """Strip trailing punctuation a sentence leaves behind, parenthesis-balance aware.
 
@@ -683,18 +695,6 @@ def _trim(raw: str) -> str:
         else:
             break
     return raw[:end]
-
-
-def _rearm(raw: str) -> str:
-    value = raw
-    for written, real in _DEFANG_REPLACEMENTS:
-        value = value.replace(written, real)
-    lowered = value.lower()
-    for written, real in _DEFANG_SCHEMES:
-        if lowered.startswith(written):
-            value = real + value[len(written) :]
-            break
-    return value
 
 
 def _parse_url(url: str) -> UrlParts:
