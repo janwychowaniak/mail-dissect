@@ -19,6 +19,166 @@ its defect.
 
 None at the moment.
 
+## 0.7.0 — 2026-10-06
+
+`ghcr.io/janwychowaniak/mail-dissect@sha256:d898bf77ad9a7d15cb761b6764535574274067765a0ecc4cb2df6ea4e770611a`
+
+Image Id `sha256:a6d3867da7165615fe916efbd985a08cb1c041bcad4e0de686695cb2aea9eaa6`, after a pull
+and after `docker load` of the release file alike. Python 3.13.16.
+
+A message can no longer hold the service: the work after parsing runs off the event loop, so
+`/v1/health` is answered while a message is dissected; the deadline is asked inside a
+dissection, not only after it; what was quadratic in the length of a run is linear; and a run, a
+header, a part's parameters, the header fields and each list of a response have a bound, past
+which the response says `truncated` (SPEC §14.3, §15, `[D29]`, `[D33]` to `[D37]`). A defanged
+form is now read as the text it stands for (`[D28]`), and a URL in text by RFC 3986's two
+grammars, with its host read as labels (`[D31]`, `[D32]`); a value derived from a URL is checked
+against its type (`[D30]`).
+
+The `/v1` paths, fields and value sets are unchanged. What moves is `observables[]`, `flags`,
+`headers{}` and `addresses{}` for a header past its length, `mime_parts[]`, `attachments[]` and
+`artifacts[]` for a part header past 8,192 characters and for a nested message written out
+again, and what the renderer is sent. Measured on the same inputs against 0.6.0 — 38 inputs
+chosen for these notes and 3,719 others: the messages the test suite sends, the saved ones, the
+golden samples, and generated text, HTML, headers and MIME trees — every difference attributed
+to the commit that made it:
+
+**Availability:**
+
+- `/v1/health` is answered during a dissection: while 50,001 links were dissected for 7.6 s it
+  answered 65 times, the slowest in 0.62 s; on 0.6.0 it waited 9.4 s, the whole dissection
+- the deadline is asked between messages, between headers, before each chunk of a scan and
+  inside the HTML scan; a message reached after it is returned whole with no candidates. With
+  `DISSECT_TIMEOUT_SECONDS=2`, the 50,001 links took 4.1 s and gave no candidates; 0.6.0 took
+  9.4 s, gave all of them and said `truncated` all the same. Work between two of those points
+  runs to its end, so a response can still come after the budget
+- inputs that took seconds or minutes, now a fraction of a second: each a single request to the
+  published 0.6.0 image and to this release's:
+
+  | Input | 0.6.0 | 0.7.0 |
+  | --- | --- | --- |
+  | 192,000 characters of base64 in one line | 78.4 s | 0.09 s |
+  | 100,000 characters of `a-` | 344 s | 0.42 s |
+  | 200,000 characters of `a[.]` | 47.2 s | 0.14 s |
+  | a header of 29,000 characters of `+1` | 32.8 s | 0.06 s |
+  | a URL followed by 200,000 `}` | 77.9 s | 0.13 s |
+  | 25,000 `url(` in a `<style>` | 57.6 s | 0.08 s |
+  | `Authentication-Results`, a run of 64,000 | 64.6 s | 0.03 s |
+  | a `Received`, `from a (` 64,000 times | 41.4 s | 0.41 s |
+  | one value in 30,000 header fields | 126 s | 0.62 s |
+  | a `Cc` of 40,000 periods, a `Content-Type` of 8,000 `(a)` | 158 s | 0.05 s |
+  | a `Content-Type` with a million semicolons | over 600 s | 0.12 s |
+  | a nested message written out again, its `Cc` 32,000 periods | 233 s | 0.09 s |
+
+  The last five are bounded by the limits below as well: the long headers, the `Received`
+  among them, are kept as written, only 1,024 of the 30,000 fields are read, the semicolons are
+  not split, and the nested message is written with its headers as stored.
+
+**Limits, each of which adds `truncated` when it applies (SPEC §15):**
+
+- a run of more than 262,144 characters with no white space is skipped whole: a URL of 262,145
+  characters gives nothing; one of 262,144 is read as before
+- a structured header longer than 8,192 characters, or any header longer than 65,536, is kept
+  in `headers{}` as written, not decoded; a structured one gives a single `null` entry in
+  `addresses{}`; both are still scanned for candidates. The length is counted as the parser
+  hands the value, one character per byte of an 8-bit header, so 40,000 `é` written as UTF-8
+  are past the limit — with the same value
+- a part's parameters are read only from a header within 8,192 characters: past it, a charset
+  is not read (the text is read as undeclared, with no `encoding_fallback`), a name is `null`,
+  and a boundary is not read, so the multipart is a leaf, with no `malformed_mime`
+- at most 1,024 header fields are read, in the order written: of 1,032, the last eight are not
+  read — in a flood of `Received`, the oldest hops, and every field written after them
+- `observables[]` lists at most 50,000 places, `links[]` and `resources[]` at most 50,000
+  entries each, per response; a link gives two places, its `url` and its `domain`, so 50,001
+  links give 50,000 links and the candidates of about 25,000 of them
+
+**Defanged forms (`[D28]`):**
+
+- after a hyphen, a period, a parenthesis, a bracket, a brace or a colon: returned, `defanged`
+  — `-one[.]example[.]net`, `(three[.]example[.]net)`, `-hxxp://seven[.]example[.]net/path`,
+  `-user[at]eight[.]example[.]net`, `-192[.]0[.]2[.]201`; each gave nothing
+- what the old token cut or distorted comes back whole: `hxxp://two[.]example[.]net/p?q=1&r=2`
+  was `http://two.example.net/p`, `.../~user` was `http://two.example.net/`, and
+  `first.last+tag[at]three[.]example[.]net` was `tag@three.example.net`
+- text around a form reads as it would written plainly: `one.example.com(two[.]example[.]net)`
+  gives both domains, the first not `defanged`, where it gave nothing; `bücher[.]de` gives
+  nothing, as `bücher.de` does, where it gave `cher.de`
+- `hxxp`, `hxxps` and `fxp` are re-armed where a URL's scheme stands, in any case and with no
+  bracket marker as well: `hxxp://example.net/x` gives `http://example.net/x`, `defanged`, where
+  it gave `hxxp://example.net/x`; `fxp[.]example[.]net` is the host `fxp.example.net`, where it
+  gave `ftp.example.net`
+- a bracket marker is one only as the table writes it: `user[AT]three[.]example[.]net` gives the
+  domain `three.example.net`, `defanged`, where it gave nothing
+- a defanged range gives both ends: `192[.]0[.]2[.]1...192[.]0[.]2[.]9`; it gave nothing
+- a marker for a period at the end is left off with the period: `www.x.co[.]` gives `www.x.co`,
+  not `defanged` and with no marker in `value_raw`, where it gave it `defanged`;
+  `http://a.example.net/x[.]` gives `http://a.example.net/x`, where it gave `.../x.` `defanged`
+
+**URLs and what is derived from them (`[D30]` to `[D32]`):**
+
+- a comma or a parenthesis stays in a path, query or fragment: `http://example.net/wiki/Foo_(bar)`
+  was cut to `.../Foo_(bar`, and `https://example.net/a,b/c?x=1,2#f,g` to `https://example.net/a`
+- `[` and `]` end a URL except around an IP-literal host: `http://example.net[1]` gives
+  `http://example.net` and its domain, where it gave `http//example.net[1` alone;
+  `mailto:a@example.net[1]` gives `a@example.net` and its domain, where it gave
+  `a@example.net[1`; `http://[2001:db8::1]/x` keeps its brackets and gives the `ip`
+  `2001:db8::1`, where it gave `http//[2001:db8::1`
+- in text a host is labels or an IP literal: markup glued to it is left out —
+  `**http://a.example.net**` gives `http://a.example.net` and its domain, where it gave
+  `http://a.example.net**` and no domain, and the same for `|`, `` ` `` and `~~`; a
+  sub-delimiter inside a host makes two URLs — `http://a.example.net;b.example.org/x` gives
+  `http://a.example.net` and `b.example.org/x` with their domains, where it gave one URL and the
+  domain `a.example.net;b.example.org`; and a damaged host is cut where it is damaged —
+  `https://examp!!e.net/a` gives `https://examp` and `e.net/a`, with the domain `e.net`
+- a host gives a domain only when it is labels, and a `mailto:` URL gives each recipient that is
+  one address: in an attribute, `http://a.example.net;b.example.org/x` and
+  `https://exa%6Dple.net/` give no domain, and `mailto:a@example.net,b@example.org` gives
+  `a@example.net` and `b@example.org`, where it gave one `email` of both
+- recorded costs: a list joined by a comma with no space after a URL with a path is read as one
+  path — `http://a.example.net/x,mailto:u@example.net`, `http://a.example.net/x,b@c.example.org`
+  and `a.example.net/x,b.example.org` each give one URL, and the address or the second domain is
+  no longer returned
+
+**Nested messages written out again (`[D35]`):**
+
+- a nested message whose bytes cannot be located — behind delimiters that end in a bare CR — is
+  written with its headers as they were stored, not refolded: its size and hashes move, a long
+  line stays whole, and a long part header in it keeps its parameters, so a declared charset
+  that cannot be taken now raises `encoding_fallback`
+- such a message whose multipart was not segmented and held an 8-bit byte was answered with a
+  500 by every release from 0.1.0; it is dissected now, written as stored
+
+**Screenshots, with `SCREENSHOT_URL` set (`[D38]`):**
+
+- each `cid:` reference is pointed at its part whole: with parts `img1` and `img10`,
+  `cid:img10` was sent as `cid-2.png0`, the first one's image; `CID:` in capitals is now
+  pointed at its part, and `xcid:...` no longer
+
+**Unchanged:**
+
+- an address in an anchor or a resource is read without the grammar and is not re-armed, as
+  before: `hxxp://one[.]example[.]net/x` stays as written, with no domain
+- a defanged form after a space: identical
+- a comma directly before another `scheme://` still ends a URL; `**http://a.example.net/x**`
+  still gives `.../x**`, since `*` may end a path; a `data:` URL in text is still cut at its
+  comma; an IPv4 address written otherwise in a host, `http://3221225994/`, still gives no `ip`
+- a run, a header and a part's parameters within their limits: identical, at 262,144
+  characters, at 8,192 and 65,536, and with 800 parameters
+- `cid:` written in the visible text of the HTML is rewritten for the renderer too, as before
+- every input to which none of the above applies: identical — 2,524 of the 3,719
+- the image runs Python 3.13.16, as 0.6.0's does. Its base was rebuilt under its tag while these
+  notes were measured — Debian 12.15, OpenSSL 3.0.22 — and this commit, built on both, answered
+  every input of these notes identically
+
+Also in this release: Known defects in `CHANGELOG.md` is empty — the defanged form after a hyphen
+or a period was the only entry.
+
+Verified against `apache/tika:3.2.3.0` and `gotenberg/gotenberg:8.37.0`.
+
+The release workflow ran the steps added after 0.6.0 for the first time: it fetched the tag as it
+was pushed, in place of the checkout's lightweight copy, attached the files with the tag message
+as the release's notes, and found the published description identical to that message.
+
 ## 0.6.0 — 2026-10-04
 
 `ghcr.io/janwychowaniak/mail-dissect@sha256:bf7b372796dc8c4cbf0a1f7a0bb497e02992d0b3158954d76220ffd0ae23fe62`
