@@ -171,6 +171,26 @@ class Candidate:
     places: set[Source] = field(default_factory=set, repr=False, compare=False)
 
 
+class Places:
+    """How many more places `observables[]` may list, across one whole response `[D37]`.
+
+    A place is one entry of an observable's `sources`, so a value in many places counts each,
+    and a new value counts its first. Shared by the collectors of every message, so nesting
+    does not multiply it.
+    """
+
+    __slots__ = ("left",)
+
+    def __init__(self, places: int) -> None:
+        self.left = places
+
+    def take(self) -> bool:
+        if self.left <= 0:
+            return False
+        self.left -= 1
+        return True
+
+
 class Collector:
     """Append-only, so the deterministic core of the list never moves `[D9]`.
 
@@ -179,10 +199,21 @@ class Collector:
     same entries in the same positions and a longer list.
     """
 
-    __slots__ = ("_order", "_registries", "_seen", "_should_stop", "stopped", "truncated")
+    __slots__ = (
+        "_order",
+        "_places",
+        "_registries",
+        "_seen",
+        "_should_stop",
+        "stopped",
+        "truncated",
+    )
 
     def __init__(
-        self, registries: Registries, should_stop: Callable[[], bool] | None = None
+        self,
+        registries: Registries,
+        should_stop: Callable[[], bool] | None = None,
+        places: Places | None = None,
     ) -> None:
         self._registries = registries
         self._seen: dict[tuple[str, str], Candidate] = {}
@@ -190,6 +221,7 @@ class Collector:
         # The deadline, asked before every chunk and every address `[D10]`. Once it has said
         # stop, nothing more is added: the list ends where the scan stopped.
         self._should_stop = should_stop
+        self._places = places
         self.stopped = False
         # Something the material holds was not read: the scan stopped, or a run was skipped.
         self.truncated = False
@@ -219,6 +251,13 @@ class Collector:
 
     def finish(self) -> list[Candidate]:
         return self._order
+
+    def _take_place(self) -> bool:
+        if self._places is None or self._places.take():
+            return True
+        self.stopped = True
+        self.truncated = True
+        return False
 
     def _stop(self) -> bool:
         if not self.stopped and self._should_stop is not None and self._should_stop():
@@ -345,9 +384,17 @@ class Collector:
         defanged: bool = False,
         ambiguous: bool = False,
     ) -> None:
-        """Deduplicate by `(value, type)`; count every occurrence, list distinct places."""
+        """Deduplicate by `(value, type)`; count every occurrence, list distinct places.
+
+        Once the places of the response are spent `[D37]`, the list stops as it does at the
+        deadline: no entry, place or occurrence is added after that, so the three agree.
+        """
+        if self.stopped:
+            return
         key = (value, type_)
         candidate = self._seen.get(key)
+        if (candidate is None or source not in candidate.places) and not self._take_place():
+            return
         if candidate is None:
             candidate = Candidate(
                 value=value,

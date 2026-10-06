@@ -950,6 +950,24 @@ and a parameter nobody asked for is worse than its absence.
 | `TIKA_URL`, `SCREENSHOT_URL` | empty | optional dependencies (empty = `disabled`) |
 | `UNWRAPPERS` | empty | the unwrapper table (§10) |
 
+| Constant | Value | What it bounds |
+| --- | --- | --- |
+| `MAX_RUN_LENGTH` | 262,144 characters | one run of non-white-space characters the scan reads `[D29]` |
+| `STRUCTURED_HEADER_LIMIT` | 8,192 characters | the unfolded value of a structured header, and of a header a part's parameters are read from `[D33]`, `[D34]` |
+| `UNSTRUCTURED_HEADER_LIMIT` | 65,536 characters | the unfolded value of an unstructured header `[D33]` |
+| `MAX_HEADER_FIELDS` | 1,024 | the fields read from one header block `[D36]` |
+| `MAX_OBSERVABLE_PLACES` | 50,000 | the places `observables[]` lists across one response `[D37]` |
+| `MAX_LINKS` | 50,000 | the entries of `links[]` across one response `[D37]` |
+| `MAX_RESOURCES` | 50,000 | the entries of `resources[]` across one response `[D37]` |
+| `MAX_TOOL_CONCURRENCY` | 4 | the tool calls in flight at once (below) |
+
+**Every limit is a length or a count of what the consumer sent, and every one is named here**,
+so where one applied can be found by measuring the input. A limit that applies gives the
+response `truncated`, and `truncated` is a flag of the whole response: it says that some derived
+fields of this response are uncertain, not which, nor whether a limit or the deadline set it.
+Left so, because a marker per part, header or list would extend the shape of the response
+(§5.1), and the inputs a consumer can measure already locate it.
+
 **A run longer than `MAX_RUN_LENGTH` = 262,144 characters is skipped whole** `[D29]`. A run is
 a stretch of characters with no white space in it, white space being every character the
 grammar's `\s` matches, the no-break space among them; its length is counted in characters of
@@ -963,6 +981,20 @@ recommends that a URI of at least 8,000 octets be supported; the limit is about 
 65,536 characters**, by the class of its parser, and **a part's parameters only from a header
 within the first** — `[D33]`, `[D34]`, and §7 says what a header past its limit gives. Both are
 lengths of what the sender wrote, so `truncated` from them depends only on the material.
+
+**At most `MAX_HEADER_FIELDS` = 1,024 fields of a header block are read** `[D36]` — of a message,
+and of each nested message — in the order they were written. The rest are not read: not in
+`headers`, not scanned, and not in `received`, `auth` or `addresses`, which this one count bounds
+together. Under a flood of `Received`, written newest first, the oldest hops are the ones left
+out.
+
+**Each list of a response is bounded on its own** `[D37]`: `observables[]` lists at most
+`MAX_OBSERVABLE_PLACES` places — a place is one entry of an observable's `sources`, so a value
+found in three places counts three — and `links[]` and `resources[]` at most `MAX_LINKS` and
+`MAX_RESOURCES` entries, across all the messages of the response, so nesting does not multiply
+them. A list that reaches its limit stops as at the deadline: no entry, place or occurrence is
+added after that, and each list is cut at the end of its own order (§11.1), never in a shared
+pool, which would let the lists built first take what the observables of the headers need.
 
 **There is deliberately no limit on the sum of attachments:** the sum of decoded bytes cannot
 exceed the input size, because transfer encoding only inflates — and the service does not
@@ -991,14 +1023,22 @@ anything.
 dependency call — and not in the middle of parsing: the service checks the deadline between
 units and stops before the next one, returning what it has computed `[D10]`. The headers of a
 message are units too: once the deadline has passed, every header not yet read is kept as
-written (§7). A message parsed in time is returned whole. Its scan asks the deadline as it goes: before every chunk of text, each
-cut just before white space, and before everything the HTML parser hands over. Once the
-deadline has passed, the scan adds nothing more. A message reached late has no candidates, one
-overtaken keeps what was found before, and its `links[]`, `resources[]` and `text_from_html`
-end where the HTML scan stopped. The asynchronous
-model does not exempt us from this: a limit placed on an I/O operation cancels the wait but
-does not interrupt parsing in progress, so without an explicit deadline `truncated` is
-unimplementable, not merely imprecise.
+written (§7). A message parsed in time is returned whole. Its scan asks the deadline as it
+goes: before every chunk of text, each cut just before white space, and before everything the
+HTML parser hands over. Once the deadline has passed, the scan adds nothing more. A message
+reached late has no candidates, one overtaken keeps what was found before, and its `links[]`,
+`resources[]` and `text_from_html` end where the HTML scan stopped. The asynchronous model does
+not exempt us from this: a limit placed on an I/O operation cancels the wait but does not
+interrupt parsing in progress, so without an explicit deadline `truncated` is unimplementable,
+not merely imprecise.
+
+**How far a response can run past the whole budget is bounded by its largest unit**, the parse
+of one message, which the deadline cannot interrupt. A parse is linear in the bytes but costs
+most on short lines: about a third of a second a megabyte for a body of empty lines, and about
+half a second for header lines, against a hundredth for lines of 76 characters (F27). So a
+message of 50 MB written that way is fifteen to twenty-five seconds of parsing past what the
+deadline says. This is not fixed, since a different parser would mean a different `[D11]`; a
+deployment that wants a tighter bound lowers `MAX_MESSAGE_BYTES`.
 
 **The boundary "this is not a message" is single and structural.** A message per RFC 5322 has
 at least one `Name: value` line before the first empty line. Not even one → `UNPARSABLE` (§16),
@@ -1045,12 +1085,19 @@ single contributor is the standard library's own representation of the message, 
 copies. **Concurrent requests multiply this figure** — the service is single-process and does
 not queue, so two dissections of that size at once want roughly twice the memory.
 
+**The response adds a term of its own**, and the entry limits bound it `[D37]`. With all three
+lists full it is about 40 MB of JSON, and building and serialising it takes about 360 MB more:
+39.1 MB and a peak of 403 MB against 43 MB at start, on Python 3.13.16, where one `model_dump`
+of it took 0.50 s and its render 0.65 s, each a call that holds the interpreter lock from start
+to end (§14.3, F28).
+
 **The third factor is the tool fan-out.** Calls to the optional tools run concurrently, up to
 **`MAX_TOOL_CONCURRENCY` = 4**, and each in-flight call holds the attachment it is sending.
 This is a constant in the code rather than a variable: the configuration surface of §19 is
 closed, and a parameter nobody asked for is worse than its absence. It is named here because a
 deployment sizing a container needs all three factors — input size, concurrent requests, and
-concurrent tool calls — and cannot derive the third from anywhere else.
+concurrent tool calls — and the response's term, and cannot derive the third from anywhere
+else.
 
 Size the container from the limits you actually configure, not from the typical message.
 
@@ -1345,6 +1392,25 @@ Approved by the maintainer, 2026-09-17.
   registry, at the registry's cost, so a `Cc` of 16,000 periods inside such a message took five
   seconds, and it rewrote a long line that the message held whole. Written as stored, the bytes
   are the same for short lines and closer to the original for long ones, and cost nothing.
+- **[D36] At most 1,024 fields of a header block are read**, in the order written (§15).
+  Decided 2026-10-05, for 0.7.0. Each field costs the parser and every list read out of headers
+  something, and a sender sets their number: before 0.7.0, one value listed in 20,000 places
+  alone took 42 seconds (F22). One count bounds `headers`, `received`, `auth` and `addresses` at
+  once, and the work behind each field; under a `Received` flood the oldest hops, written last,
+  are the ones left out. The parser still reads the whole header block, and that floor is what
+  `MAX_MESSAGE_BYTES` bounds (F27).
+- **[D37] Each list of a response is bounded on its own, across the whole response** (§15):
+  50,000 places in `observables[]`, 50,000 entries in `links[]` and in `resources[]`. Decided
+  2026-10-05 and 2026-10-06, for 0.7.0, the values measured on the image's interpreter (F28). A
+  response is serialised in one call that holds the interpreter lock for its whole length, and
+  nothing bounded its lists: a link is about 275 bytes of JSON, so a message of the largest size
+  written as short anchors would have answered with close to a gigabyte. With all three lists
+  full, one `model_dump` takes half a second and the response is about 40 MB. A place, one entry of
+  `sources`, is what is counted, because one value in many places is one entry with many places
+  and costs as many. The limits are per response and not per message, since nested messages
+  would multiply a per-message one, and per list, since a shared pool would let the lists built
+  first take what the observables of the headers need. A list that reaches its limit stops as
+  at the deadline, so its entries, places and occurrences agree.
 
 **Implementation**
 

@@ -18,7 +18,12 @@ from fastapi.testclient import TestClient
 
 from mail_dissect import observables
 from mail_dissect.app import create_app
-from mail_dissect.headers import STRUCTURED_HEADER_LIMIT, UNSTRUCTURED_HEADER_LIMIT
+from mail_dissect.dissect import MAX_LINKS, MAX_OBSERVABLE_PLACES, MAX_RESOURCES
+from mail_dissect.headers import (
+    MAX_HEADER_FIELDS,
+    STRUCTURED_HEADER_LIMIT,
+    UNSTRUCTURED_HEADER_LIMIT,
+)
 from mail_dissect.observables import MAX_RUN_LENGTH
 from mail_dissect.settings import Settings
 
@@ -356,3 +361,76 @@ def test_every_parameter_reader_asks_the_bounded_method() -> None:
     import pins
 
     pins.check_parameter_funnel()
+
+
+# -- header fields `[D36]` and entry limits `[D37]` --------------------------------------------
+
+
+def test_the_header_fields_past_the_limit_are_not_read(
+    settings: Settings, clock: FakeClock
+) -> None:
+    """`[D36]`: at most `MAX_HEADER_FIELDS` fields of a header block are read, in written order.
+
+    The field at the limit is read and its candidate found; one field more and the last one is
+    not, and the response says `truncated`. Every list read out of headers is bounded at once:
+    a flood of `Received` loses its oldest hops, which are written last.
+    """
+    for n in (0, 1):
+        fields = [("X-H", f"v{i}") for i in range(MAX_HEADER_FIELDS - 1 + n)]
+        fields.append(("X-Last", "last.example.net"))
+        body = _plain(settings, clock, b.message(fields, body=b"x"))
+        message = body["messages"][0]
+        values = [o["value"] for o in message["observables"]]
+        if n == 0:
+            assert message["headers"]["x-last"] == ["last.example.net"]
+            assert "last.example.net" in values and body["flags"] == []
+        else:
+            assert "x-last" not in message["headers"]
+            assert "last.example.net" not in values and body["flags"] == ["truncated"]
+    hops = [
+        ("Received", f"from h{i}.example.net by mx.example.org; Sun, 4 Oct 2026")
+        for i in range(1030)
+    ]
+    body = _plain(settings, clock, b.message(hops, body=b"x"))
+    received = body["messages"][0]["received"]
+    assert len(received) == MAX_HEADER_FIELDS
+    assert received[-1]["from_host"] == f"h{MAX_HEADER_FIELDS - 1}.example.net"
+
+
+def test_the_places_observables_may_list_are_bounded_per_response(
+    settings: Settings, clock: FakeClock
+) -> None:
+    """`[D37]`: `MAX_OBSERVABLE_PLACES` places, each entry of an observable's `sources`.
+
+    Distinct domains in a text body, one place each: at the limit every one is listed, one
+    more and the last is not, with `truncated`. The first domain is written once more at the
+    end: within the limit it counts two occurrences; past it the list has stopped, as at the
+    deadline, and it still counts one, so occurrences and places agree.
+    """
+    for n, occurrences in ((0, 2), (1, 1)):
+        domains = [f"h{i}.example.net" for i in range(MAX_OBSERVABLE_PLACES + n)]
+        text = " ".join([*domains, domains[0]])
+        body = _plain(settings, clock, b.message({"Subject": "s"}, body=text.encode()))
+        observables = body["messages"][0]["observables"]
+        assert len(observables) == MAX_OBSERVABLE_PLACES, n
+        assert observables[0]["occurrences"] == occurrences, n
+        assert ("truncated" in body["flags"]) is bool(n), n
+
+
+def test_the_links_and_resources_of_a_response_are_bounded(
+    settings: Settings, clock: FakeClock
+) -> None:
+    """`[D37]`: `MAX_LINKS` and `MAX_RESOURCES`, each list on its own. The same anchor, or the
+    same image, written over and over: each is an entry of its list, and one observable, so
+    the limit on places does not cut first. The address is `#`, the cheapest to decompose: a
+    hundred thousand elements are seconds of work whatever they point at."""
+    for tag, key, limit in (
+        ('<a href="#"></a>', "links", MAX_LINKS),
+        ('<img src="#">', "resources", MAX_RESOURCES),
+    ):
+        for n in (0, 1):
+            html = tag * (limit + n)
+            raw = b.message({"Content-Type": "text/html"}, body=html.encode())
+            body = _plain(settings, clock, raw)
+            assert len(body["messages"][0][key]) == limit, (key, n)
+            assert ("truncated" in body["flags"]) is bool(n), (key, n)

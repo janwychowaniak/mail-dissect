@@ -9,9 +9,10 @@ against the versions in `uv.lock`; F20 on **2026-10-01** with
 was run inside the published 0.4.0 image and on the tree that became 0.5.0; F21 on
 **2026-10-03** with `probes/email_stdlib.py`, on 3.13.12 and on 3.13.15 inside the published
 0.5.0 image; F22 on **2026-10-05** with [`probes/grammar.py`](probes/grammar.py), on 3.13.12
-against the tree of `v0.6.0`; F23 on **2026-10-05** and F24 to F26 on **2026-10-06** with
-`probes/email_stdlib.py`, on 3.13.12 and on 3.13.16 inside the published 0.6.0 image. Each of
-them is printed by one function in its script; re-run the script against a
+against the tree of `v0.6.0`; F23 on **2026-10-05** and F24 to F27 on **2026-10-06** with
+`probes/email_stdlib.py`, on 3.13.12 and on 3.13.16 inside the published 0.6.0 image; F28 on
+**2026-10-06** with [`probes/response.py`](probes/response.py) inside the 0.6.0 image, with the
+service's source of 0.7.0 on its path. Each of them is printed by one function in its script; re-run the script against a
 newer interpreter, dependency or release to see whether a finding still holds. The scripts are
 offline and read-only. F13 to F16 each say how they were measured.
 
@@ -83,6 +84,12 @@ number, as F15 was.
   characters through the header registry: a `Cc` of 16,000 periods takes five seconds to
   write. With `refold_source="none"` each header is written as stored, the same bytes for short
   lines and none of the cost. Hence `[D35]`. (F26)
+- One parse is linear in the bytes but costs most on short lines: about a third of a second a
+  megabyte for empty lines, half a second for header lines, a hundredth for lines of 76
+  characters. It is the largest unit the deadline cannot interrupt. (F27)
+- Serialising a response costs about four microseconds an entry in `model_dump` and as much
+  again to render, and an entry is about 250 bytes of JSON; with three lists of 50,000 it is half
+  a second, 39 MB and a peak of 403 MB. Hence the values of `[D37]`. (F28)
 - `html.parser` fed in pieces reads a document the way it reads it fed at once only where the
   interpreter decides the end of an empty comment without looking ahead: 3.13.16 does, 3.13.12
   does not. The parse of `<!-->` itself moved between the two. Hence the HTML scan is fed once
@@ -1011,3 +1018,50 @@ registry**, at the registry's cost (F24):
 as refolded ones for short lines and for a header folded into short lines, and differ for a
 line of 200 characters, which refolding breaks up: written as stored, the nested message keeps
 what the message held. Hence `[D35]`.
+
+---
+
+## F27 — one parse costs most when the lines are many and short
+
+Probed with `f27_the_parse_floor` in `probes/email_stdlib.py` on 3.13.12 and on 3.13.16 inside
+the published 0.6.0 image, one try each.
+
+| `BytesParser`, `compat32` | 1 MB | 2 MB | 4 MB |
+| --- | --- | --- | --- |
+| a body of empty lines, 3.13.12 | 0.32 s | 0.51 s | 1.07 s |
+| a body of empty lines, 3.13.16 | 0.37 s | 0.74 s | 1.54 s |
+| a body of 76-character lines (control), 3.13.12 | 0.01 s | 0.02 s | 0.05 s |
+| a body of 76-character lines (control), 3.13.16 | 0.03 s | 0.05 s | 0.11 s |
+| header lines of `X-A: a`, 3.13.12 | 0.37 s | 0.85 s | 1.49 s |
+| header lines of `X-A: a`, 3.13.16 | 0.65 s | 1.04 s | 2.15 s |
+
+Linear, with a cost per line: a body of empty lines is about 0.3–0.4 s a megabyte, header lines
+about 0.4–0.5 s, against 0.01–0.03 s for lines of ordinary length. One message is parsed in one
+call, the unit `[D10]` cannot cut, so a message of `MAX_MESSAGE_BYTES` written that way is
+fifteen to twenty-five seconds of parsing wherever the deadline stands. No limit inside the
+service bounds it, since a different parser would mean a different `[D11]`; §15 says that a
+deployment lowers `MAX_MESSAGE_BYTES` for a tighter bound.
+
+---
+
+## F28 — what serialising a response costs by the length of its lists
+
+Probed with `probes/response.py` on 3.13.16 inside the published 0.6.0 image, with the service's
+source of 0.7.0 on its path and the image's dependencies, which `uv.lock` pins, best of two.
+
+| One list, the others empty | `model_dump` | render | JSON |
+| --- | --- | --- | --- |
+| 25,000 observables | 0.09 s | 0.17 s | 5.8 MB |
+| 50,000 observables | 0.19 s | 0.22 s | 11.6 MB |
+| 100,000 observables | 0.38 s | 0.42 s | 23.3 MB |
+| 50,000 links | 0.16 s | 0.21 s | 13.7 MB |
+| 100,000 links | 0.31 s | 0.42 s | 27.5 MB |
+| 50,000 resources | 0.16 s | 0.18 s | 13.7 MB |
+| 100,000 resources | 0.30 s | 0.44 s | 27.5 MB |
+| **all three at 50,000** | **0.50 s** | **0.65 s** | **39.1 MB** |
+
+Each observable has one place here. Linear, about four microseconds an entry in each of the
+two calls, and each is one call that holds the interpreter lock from start to end, so nothing
+else the process does runs during it. With all three lists at 50,000, built in a fresh process,
+the peak memory was 403 MB against 43 MB at start. Hence the values of `[D37]`: with all three
+lists full, one `model_dump` of the response is half a second, the length one call may have.

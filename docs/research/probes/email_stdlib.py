@@ -2,7 +2,7 @@
 
 Run:  python3.13 docs/research/probes/email_stdlib.py
 
-Findings F1 to F10, F17 to F19, F21 and F23 to F26 in ../NOTES.md are produced by one function
+Findings F1 to F10, F17 to F19, F21 and F23 to F27 in ../NOTES.md are produced by one function
 each here.
 The probes are read-only, offline, and depend on nothing but the standard library, so
 anyone can re-run them against a newer interpreter and see whether a finding still
@@ -682,6 +682,27 @@ def f26_writing_a_message_out_again() -> None:
         print(f"  {label:26} refolded and as stored {'identical' if a == b else 'differ'}")
 
 
+def f27_the_parse_floor() -> None:
+    """What does one parse cost when the lines are many and short?"""
+    _banner("F27", "the cost of one parse, by line length")
+    shapes = {
+        "a body of empty lines": lambda size: b"Subject: s\r\n\r\n" + b"\r\n" * (size // 2),
+        "a body of 76-character lines (control)": lambda size: (
+            b"Subject: s\r\n\r\n" + (b"a" * 76 + b"\r\n") * (size // 78)
+        ),
+        "header lines of 'X-A: a'": lambda size: b"X-A: a\r\n" * (size // 8) + b"\r\nbody",
+    }
+    for label, make in shapes.items():
+        cells = []
+        for megabytes in (1, 2, 4):
+            raw = make(megabytes * 1_000_000)
+            start = time.perf_counter()
+            BytesParser(policy=email.policy.compat32).parsebytes(raw)
+            elapsed = time.perf_counter() - start
+            cells.append(f"{megabytes} MB {elapsed:.2f}s")
+        print(f"  {label:40} " + "  ".join(cells))
+
+
 def main() -> int:
     print(f"python {sys.version}")
     f1_nested_reserialisation_is_not_byte_identical()
@@ -702,6 +723,7 @@ def main() -> int:
     f24_the_header_parser_cost()
     f25_part_parameters()
     f26_writing_a_message_out_again()
+    f27_the_parse_floor()
     return 0
 
 

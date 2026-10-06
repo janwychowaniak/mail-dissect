@@ -36,6 +36,11 @@ from .models import substituted
 # this many characters of its unfolded value, an unstructured one up to the larger.
 STRUCTURED_HEADER_LIMIT = 8_192
 UNSTRUCTURED_HEADER_LIMIT = 65_536
+# [D36]: at most this many fields of one header block - a message's, a nested message's - are
+# read, in the order they were written. The rest are not, and the response says `truncated`.
+# One bound for every list read out of headers: `headers{}`, `received[]`, `auth[]` and
+# `addresses{}`, and the work behind each field.
+MAX_HEADER_FIELDS = 1_024
 
 
 class _BoundedMessage(Message):
@@ -153,7 +158,10 @@ def header_map(raw: bytes, should_stop: Callable[[], bool] | None = None) -> Hea
     message = BytesHeaderParser(policy=COMPAT32_TEXT).parsebytes(raw)
     block = HeaderBlock(headers={})
     stopped = False
-    for name, value in message.items():
+    for position, (name, value) in enumerate(message.items()):
+        if position == MAX_HEADER_FIELDS:
+            block.cut = True
+            break
         stopped = stopped or (should_stop is not None and should_stop())
         if stopped or over_limit(name, value):
             block.cut = True
@@ -356,7 +364,10 @@ def addresses_of(
     result: dict[str, list[Address]] = {}
     cut = False
     stopped = False
-    for name, value in message.items():
+    for position, (name, value) in enumerate(message.items()):
+        if position == MAX_HEADER_FIELDS:
+            cut = True
+            break
         lowered = name.lower()
         if lowered not in ADDRESS_HEADERS:
             continue

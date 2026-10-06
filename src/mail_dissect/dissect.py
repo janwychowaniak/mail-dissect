@@ -39,7 +39,7 @@ from .models import (
     ToolsOut,
     scrub_surrogates,
 )
-from .observables import Collector, Source
+from .observables import Collector, Places, Source
 from .registries import Registries
 from .settings import Settings
 from .sniff import is_document
@@ -48,6 +48,14 @@ from .unwrap import Unwrapper
 from .urls import UrlParts, split
 
 MAX_TOOL_CONCURRENCY = 4
+# [D37]: how long each list may grow across one response. The response is serialised in one
+# call that holds the interpreter lock for its whole length, and these put that call at about
+# half a second with all three full, and the response at about 40 MB. Each list is cut at the
+# end of its own order: one pool for all three would let the links and resources, built first,
+# take what the observables of the headers need.
+MAX_OBSERVABLE_PLACES = 50_000
+MAX_LINKS = 50_000
+MAX_RESOURCES = 50_000
 
 # `token "/" token` (RFC 9110): the only shape of media type a request header carries as it is.
 _MEDIA_TYPE = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+/[!#$%&'*+.^_`|~0-9A-Za-z-]+")
@@ -72,6 +80,9 @@ class _Assembly:
         self.registries: Registries | None = None
         self.artifacts: list[ArtifactOut] = []
         self.flags: set[str] = set()
+        self.places = Places(MAX_OBSERVABLE_PLACES)
+        self.links_left = MAX_LINKS
+        self.resources_left = MAX_RESOURCES
 
     def store_artifact(
         self,
@@ -426,7 +437,7 @@ def _scan_observables(
     no candidates, and a scan the deadline overtakes keeps what it found before it.
     """
     assert assembly.registries is not None
-    collector = Collector(assembly.registries, should_stop=deadline.expired)
+    collector = Collector(assembly.registries, should_stop=deadline.expired, places=assembly.places)
 
     for name, values in parsed.headers.items():
         for index, value in enumerate(values):
@@ -569,11 +580,19 @@ def _build_addresses(
         return links, resources
     for event in scan.events:
         if isinstance(event, AnchorEvent):
+            if assembly.links_left <= 0:
+                assembly.flags.add("truncated")  # [D37]
+                continue
+            assembly.links_left -= 1
             fields = _url_fields(event.href, assembly, cid_map)
             links.append(
                 LinkOut(text=assembly.text(event.text) if event.text else None, **fields)  # type: ignore[arg-type]
             )
         elif isinstance(event, ResourceEvent):
+            if assembly.resources_left <= 0:
+                assembly.flags.add("truncated")  # [D37]
+                continue
+            assembly.resources_left -= 1
             fields = _url_fields(event.href, assembly, cid_map)
             resources.append(ResourceOut(element=event.element, **fields))  # type: ignore[arg-type]
     return links, resources

@@ -355,6 +355,10 @@ The full record is `docs/SPEC.md` §22. The ones most likely to be "improved" by
   parser's view `[D24]`: making it agree with the name is the same regression as restoring a
   value as written.
 - **[D15]** HTML is parsed with the standard library; do not reach for `lxml` for "robustness".
+- **[D37]** the entry limits are per response and per list. Per message looks fairer and lets
+  nesting multiply them; one pool for all lists looks simpler and lets the links and resources,
+  built first, take what the observables of the headers need. A list that stops adds no
+  occurrence either, so that `occurrences` and `sources` still agree.
 - **[D33]** a header past its limit is kept as written, not decoded "as far as it goes": the
   limit is a length because the parser's cost is its steps times what is left, and the steps
   move with the interpreter (F24). Decoding the start of a long value returns a value the
