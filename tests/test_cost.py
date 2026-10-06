@@ -76,6 +76,26 @@ def test_a_run_of_markers_is_read_in_linear_time(client: TestClient) -> None:
     assert elapsed < THRESHOLD, f"took {elapsed:.1f}s"
 
 
+def test_cid_references_are_pointed_at_their_assets_in_one_pass() -> None:
+    """F29: each part's reference was a replace over the whole HTML, so the cost was the HTML's
+    length times the number of parts, about 23 seconds for 45 MB and 500 parts, the largest
+    message and the most parts the service takes. One pass reads the HTML once `[D38]`, and
+    every reference is still rewritten."""
+    from mail_dissect.dissect import _point_at_assets
+
+    names = {f"img{i}@example.net": f"cid-{i}.png" for i in range(500)}
+    references = "".join(f'<img src="cid:img{i}@example.net">' for i in range(500))
+    filler = "<p>" + "Dear customer, your order has shipped. " * 50 + "</p>\n"
+    html = references + filler * (45_000_000 // len(filler))
+
+    started = time.perf_counter()
+    rewritten = _point_at_assets(html, names)
+    elapsed = time.perf_counter() - started
+
+    assert rewritten.count('src="cid-') == 500 and "cid:" not in rewritten
+    assert elapsed < THRESHOLD, f"took {elapsed:.1f}s"
+
+
 def test_a_long_tail_of_closers_is_trimmed_in_linear_time(client: TestClient) -> None:
     """F22: trimming took a character off at a time, copying the rest and counting the
     brackets again, so a URL followed by 192,000 `}` took about 53 seconds. Here the tail is

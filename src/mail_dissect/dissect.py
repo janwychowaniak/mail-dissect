@@ -59,6 +59,12 @@ MAX_RESOURCES = 50_000
 
 # `token "/" token` (RFC 9110): the only shape of media type a request header carries as it is.
 _MEDIA_TYPE = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+/[!#$%&'*+.^_`|~0-9A-Za-z-]+")
+# [D38]: a `cid:` reference is the scheme, in either case and not the end of a longer one, and
+# the Content-ID after it up to `?` or `#`, matched whole. A replace per part rewrote
+# `cid:img10` for the part named `img1`, depended on the order of the parts, and read the HTML
+# once for every part. The lookbehind stands after the first letter, so that the search can skip
+# to the next `c` rather than try every position.
+_CID_REFERENCE = re.compile(r"[cC](?<![\w+.-][cC])[iI][dD]:([^\s\"'<>()?#]+)")
 
 _FLAG_ORDER: tuple[Flag, ...] = (
     "truncated",
@@ -322,6 +328,7 @@ def _render_payload(item: _Built) -> tuple[str, dict[str, tuple[bytes, str]]]:
     info = item.parsed.tree.parts[index]
     html = info.text.text if info.text else ""
     assets: dict[str, tuple[bytes, str]] = {}
+    names: dict[str, str] = {}
     for content_id, part_index in item.cid_map.items():
         part = item.parsed.tree.parts[part_index]
         if part.payload is None:
@@ -330,8 +337,13 @@ def _render_payload(item: _Built) -> tuple[str, dict[str, tuple[bytes, str]]]:
         extension = mime.rsplit("/", 1)[-1] if "/" in mime else "bin"
         name = f"cid-{part_index}.{extension}"
         assets[name] = (part.payload, mime)
-        html = html.replace(f"cid:{content_id}", name)
-    return html, assets
+        names[content_id] = name
+    return _point_at_assets(html, names), assets
+
+
+def _point_at_assets(html: str, names: dict[str, str]) -> str:
+    """Each `cid:` reference to a part sent beside the HTML, pointed at it, in one pass."""
+    return _CID_REFERENCE.sub(lambda found: names.get(found.group(1), found.group(0)), html)
 
 
 def _materialise(collector: Collector, assembly: _Assembly) -> list[ObservableOut]:

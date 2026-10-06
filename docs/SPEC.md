@@ -893,8 +893,10 @@ reported as a full one would be a silent failure.
   `image/jpeg` or `image/webp`). The shape matches Gotenberg's screenshot route, so that image
   works with no adapter; any other renderer needs a thin shim to this contract.
 - Embedded resources are sent as asset parts named from the **part index**, never from the
-  sender's filename, and the `cid:` references in the HTML are rewritten to those names. Remote
-  URLs are left untouched; the renderer is expected to be configured not to load them.
+  sender's filename, and the `cid:` references in the HTML are rewritten to those names: each
+  reference whole, where its Content-ID is exactly that of a part, as `cid_part` reads an
+  address `[D38]`. Remote URLs are left untouched; the renderer is expected to be configured not to load
+  them.
 - **Recommendations for the rendering component** (not a requirement of this service, but a
   deployment without them is imprudent): scripting disabled, no navigation and no fetching of
   remote resources, a fresh process per render, a hard time limit. Mail clients do not run
@@ -1446,6 +1448,18 @@ Approved by the maintainer, 2026-09-17.
   would multiply a per-message one, and per list, since a shared pool would let the lists built
   first take what the observables of the headers need. A list that reaches its limit stops as
   at the deadline, so its entries, places and occurrences agree.
+- **[D38] A `cid:` reference in the HTML sent to the renderer is rewritten whole, in one pass**
+  (§14.2). A reference is `cid:`, in either case and not the end of a longer scheme, and the
+  Content-ID after it up to `?` or `#` or a character that ends an address in HTML; it is
+  rewritten when that Content-ID is exactly one of a part sent beside the HTML — the reading
+  `cid_part` makes of an address, applied to the HTML as written. Decided 2026-10-06, for
+  0.7.0. Until then each part's
+  reference was replaced as a substring, one replace over the whole HTML for each part: the
+  part named `img1` took `cid:img10` as well, so which image a reference showed depended on the
+  order of the parts, and the cost was the HTML's length times the number of parts, 23 s for
+  45 MB and 500 parts, the largest message and the most parts the service takes (F29). Only the
+  screenshot depends on it, but a screenshot is read by a person as what the message showed, and
+  the wrong image in it says something the message did not.
 
 **Implementation**
 

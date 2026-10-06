@@ -1095,3 +1095,28 @@ two calls, and each is one call that holds the interpreter lock from start to en
 else the process does runs during it. With all three lists at 50,000, built in a fresh process,
 the peak memory was 403 MB against 43 MB at start. Hence the values of `[D37]`: with all three
 lists full, one `model_dump` of the response is half a second, the length one call may have.
+
+## F29 — pointing `cid:` references at the renderer's assets, per part and in one pass
+
+Probed with `probes/render.py` on 3.13.12, and on 3.13.16 inside the published 0.6.0 image with
+the service's source of 0.7.0 on its path, best of two. Until 0.7.0 each part with a
+`Content-ID` was one replace of `cid:<id>` over the whole HTML; the probe keeps that loop as its
+definition and times it against the one pass of `[D38]` on the same HTML, with 500 parts, the
+most the service takes:
+
+| HTML | per part, 3.13.12 / 3.13.16 | one pass, 3.13.12 / 3.13.16 |
+| --- | --- | --- |
+| 10 MB, a reference to each part, then text | 2.23 / 2.27 s | 0.11 / 0.17 s |
+| 20 MB, the same | 4.39 / 4.40 s | 0.22 / 0.31 s |
+| 45 MB, the same | 23.10 / 23.74 s | 0.50 / 0.73 s |
+| 45 MB, references end to end | 26.63 / 27.18 s | 1.63 / 2.60 s |
+
+The loop costs the HTML's length for every part, whether or not the part is referenced, and
+each replace is one call that holds the interpreter lock; the one pass reads the HTML once and
+calls back into Python for each reference it finds, so the interpreter can switch threads
+between them. References end to end, about 1.3 million at 45 MB, are the most it has to
+rewrite. Where the loop was not wrong the two give the same HTML. Where it was, the loop's
+result depends on the order of the parts: with `img1` read before `img10`,
+`<img src="cid:img10">` became `<img src="a.png0">` — a substring of one reference taken for
+another. Only the screenshot was affected, an artifact that depends on a tool and so on the
+environment (§17).

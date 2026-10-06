@@ -225,6 +225,59 @@ def test_embedded_resources_are_sent_as_assets(settings: Settings, clock: FakeCl
     assert b"cid:logo001" not in sent
 
 
+def _rendered(settings: Settings, clock: FakeClock, raw: bytes) -> tuple[bytes, dict]:
+    """What the renderer was sent, and the response."""
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, content=PNG, headers={"content-type": "image/png"})
+
+    with _with_tools(settings, clock, handler, tika_url="") as client:
+        body = dissect(client, raw)
+    return captured[0].content, body
+
+
+def test_a_cid_reference_is_matched_whole(settings: Settings, clock: FakeClock) -> None:
+    """`[D38]`: until 0.7.0 each part's reference was replaced as a substring, so with the part
+    named `img1` read first, `cid:img10` became `cid-2.png0` and pointed at the wrong part."""
+    raw = b.multipart(
+        "related",
+        b.part("text/html", b'<img src="cid:img10"><img src="cid:img1">'),
+        b.part("image/png", PNG, content_id="<img1>", disposition="inline", filename="a.png"),
+        b.part("image/png", PNG, content_id="<img10>", disposition="inline", filename="b.png"),
+    )
+
+    sent, _ = _rendered(settings, clock, raw)
+
+    assert b'<img src="cid-3.png"><img src="cid-2.png">' in sent
+
+
+def test_a_cid_reference_is_the_address_cid_part_resolves(
+    settings: Settings, clock: FakeClock
+) -> None:
+    """`[D38]`: the scheme in either case, and the Content-ID up to `?` or `#`; never the end of
+    a longer scheme. Each is rewritten where `resources[].cid_part` resolves the same address,
+    and only there: 0.6.0 left the first as it was and rewrote the third."""
+    html = b'<img src="CID:logo001"><img src="cid:logo001?v=2#top"><img src="xcid:logo001">'
+    raw = b.multipart(
+        "related",
+        b.part("text/html", html),
+        b.part("image/png", PNG, content_id="<logo001>", disposition="inline", filename="l.png"),
+    )
+
+    sent, body = _rendered(settings, clock, raw)
+
+    expected = b'<img src="cid-2.png"><img src="cid-2.png?v=2#top"><img src="xcid:logo001">'
+    assert expected in sent
+    resources = body["messages"][0]["resources"]
+    assert [(r["href"], r["cid_part"]) for r in resources] == [
+        ("CID:logo001", 2),
+        ("cid:logo001?v=2#top", 2),
+        ("xcid:logo001", None),
+    ]
+
+
 def test_nested_message_gets_its_own_screenshot(settings: Settings, clock: FakeClock) -> None:
     """Test 59 `[D3]`: the nested message is often the one that matters."""
     inner = b.multipart("alternative", b.part("text/html", b"<p>inner</p>"), boundary="IN")
