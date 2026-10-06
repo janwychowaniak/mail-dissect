@@ -103,8 +103,8 @@ docker run --rm -v "$PWD/tests:/tests:ro" mail-dissect:dev python /tests/pins.py
 ```
 
 **The image's Python is not the developer's.** `python:3.13-slim-bookworm` is rebuilt under
-its tag, so the image carries whatever 3.13.x is current (3.13.16 at 0.6.0, while the suite
-ran on 3.13.12), and what `headers{}` and `addresses{}` return is that interpreter's parser at work
+its tag, so the image carries whatever 3.13.x is current (3.13.16 at 0.6.0 and 0.7.0, while the
+suite ran on 3.13.12), and what `headers{}` and `addresses{}` return is that interpreter's parser at work
 `[D24]`. `tests/pins.py` holds the expectations that depend on it — the header registry's map
 and the values of the saved messages — and needs nothing the image lacks, so the last line
 above runs them on the interpreter that ships. CI runs it in the `container` job and the
@@ -247,7 +247,7 @@ contract — the version tag is.
 **What the version number says.** A patch fixes a defect and leaves the contract as it was
 (0.1.1). A minor release changes behaviour a consumer can see within `/v1` — which inputs raise
 a flag, what a folded header yields, which addresses are candidates — without extending a closed
-set (every release from 0.2.0 to 0.6.0); calling that a patch would misdescribe it. Extending a
+set (every release from 0.2.0 to 0.7.0); calling that a patch would misdescribe it. Extending a
 closed set is `/v2`. `1.0.0` is released when the consumer says so `[D16]`.
 
 **Every release, in this order:** the notes list what changes in behaviour, measured by running
@@ -266,12 +266,22 @@ the release's page on GitHub is read against the tag message, since it is a thir
 notes; and the published image is run against the previous one on an input from each line of
 the notes, the previous version being the control.
 
+**A difference in the corpus is classified by the commit that made it.** Run in process through
+each commit of the release that touches `src`, the corpus attributes every difference between the
+two versions to one step, whose decision says whether it was meant, and a step meant to change
+nothing shows that it changed nothing; at 0.7.0 the 1,195 differences among 3,719 messages fell to
+eight steps with none left over. A defect the corpus finds is fixed before the release commit:
+0.7.0's found a 500 that every release since 0.1.0 had answered (F30).
+
 **The base image moves under its tag, so the notes are measured on the base that will ship.**
 `python:3.13-slim-bookworm` went from 3.13.15 to 3.13.16 between the measurement of 0.6.0's notes
 and its tag, and only a CI log said so; the same commit was then built on both, answered every
 input of the notes identically, and the notes said the interpreter had moved. Before the tag,
 read the base's digest from the registry and compare it with the one the measured build was made
-from; after it, read the interpreter from the published image rather than from the plan.
+from; after it, read the interpreter from the published image rather than from the plan. At 0.7.0
+it moved again on the day of the tag — the same Python, rebuilt with newer Debian packages — and
+the commit built on both answered every input of the notes identically, which the notes then
+said.
 
 **The release files are the published image, by its full tag, and its checksum.** The
 workflow's `archive` job pulls what was pushed by its digest, saves it, loads it back into an
@@ -374,6 +384,16 @@ The full record is `docs/SPEC.md` §22. The ones most likely to be "improved" by
   method every reader asks, and `tests/pins.py` pins that they still do. Reading "just the
   charset" out of a long header with a pattern of our own is a parser in front of the parser,
   the mistake `[D27]` already names.
+- **[D35]** a nested message written out again — only when its span cannot be verified — is
+  written with its headers as stored (`refold_source="none"`) and an unsegmented multipart in it
+  as stored (`_AsStored`). Both look like something to simplify. Refolding sends every long line
+  through the header registry, at its cost (F26); and stock `BytesGenerator` hands the text of an
+  unsegmented multipart out with U+FFFD for each 8-bit byte and then cannot encode it, which was
+  a 500 in every release before 0.7.0 (F30).
+- **[D38]** a `cid:` reference sent to the renderer is rewritten whole, in one pass, by the
+  reading `cid_part` makes of an address. A `str.replace` per part looks simpler and rewrote
+  `cid:img10` for the part named `img1` — the wrong image in the screenshot — at the HTML's
+  length times the number of parts (F29).
 - **[D20]**, SPEC §5.1: `encoding_fallback` fires when, and only when, a declared charset was
   not taken or something was substituted. A scrub that loses nothing — raw UTF-8 in an address
   — is not reported. Flagging every scrub looks like diligence and is the same mistake as `[D23]`:
