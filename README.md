@@ -299,12 +299,12 @@ instead:
 
 ```bash
 # On a machine that can pull. BY TAG, never by image ID.
-docker save ghcr.io/janwychowaniak/mail-dissect:0.6.0 apache/tika:3.2.3.0   gotenberg/gotenberg:8.37.0 -o mail-dissect-bundle.tar
+docker save ghcr.io/janwychowaniak/mail-dissect:0.7.0 apache/tika:3.2.3.0   gotenberg/gotenberg:8.37.0 -o mail-dissect-bundle.tar
 sha256sum mail-dissect-bundle.tar        # compare this on the other side
 
 # On the target host.
 docker load -i mail-dissect-bundle.tar
-docker image inspect ghcr.io/janwychowaniak/mail-dissect:0.6.0 --format '{{.RepoTags}}'
+docker image inspect ghcr.io/janwychowaniak/mail-dissect:0.7.0 --format '{{.RepoTags}}'
 ```
 
 **`docker save <image id>` produces an archive that loads with no tags at all**, and an
@@ -323,9 +323,9 @@ artifact both sides actually hold.
 saved by its full tag, with `mail-dissect-<version>.tar.gz.sha256` beside it. On the target host:
 
 ```bash
-sha256sum -c mail-dissect-0.6.0.tar.gz.sha256
-docker load -i mail-dissect-0.6.0.tar.gz
-docker image inspect --format '{{.Id}}' ghcr.io/janwychowaniak/mail-dissect:0.6.0
+sha256sum -c mail-dissect-0.7.0.tar.gz.sha256
+docker load -i mail-dissect-0.7.0.tar.gz
+docker image inspect --format '{{.Id}}' ghcr.io/janwychowaniak/mail-dissect:0.7.0
 ```
 
 The last line must print the image Id published with the release, in `CHANGELOG.md`. **The Id
