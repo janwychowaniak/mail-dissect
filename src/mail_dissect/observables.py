@@ -42,13 +42,7 @@ _DEFANG_SCHEMES: tuple[tuple[str, str], ...] = (
     ("hxxp", "http"),
     ("fxp", "ftp"),
 )
-_DEFANG_MARKER = re.compile(
-    r"\[\.\]|\(\.\)|\{\.\}|\[dot\]|\(dot\)|\[:\]|\[at\]|\(at\)|\[@\]|h[xX]{2}ps?|f[xX]p",
-)
 
-_MARKERS = r"(?:\[\.\]|\(\.\)|\{\.\}|\[dot\]|\(dot\)|\[:\]|\[at\]|\(at\)|\[@\])"
-_SAFE_CHARS = r"[A-Za-z0-9@:._/-]"
-_TOKEN_CHARS = r"[A-Za-z0-9\[\](){}@:._/-]"
 _LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
 _HOST = rf"(?:{_LABEL}\.)+{_LABEL}"
 # [D31] A URL has two grammars, as RFC 3986 has: one for the authority and one for the path,
@@ -741,7 +735,3 @@ def _valid_ip(text: str) -> tuple[str, ObservableSubtype] | None:
     except ValueError:
         return None
     return str(address), ("ipv4" if address.version == 4 else "ipv6")
-
-
-def has_defang_marker(text: str) -> bool:
-    return _DEFANG_MARKER.search(text) is not None
