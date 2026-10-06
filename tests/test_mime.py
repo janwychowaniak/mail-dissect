@@ -423,6 +423,45 @@ def test_nesting_deeper_than_the_limit_is_partial_not_an_error(
     assert ("truncated" in body["flags"]) is cut
 
 
+def test_an_unsegmented_multipart_with_eight_bit_bytes_is_written_as_stored(
+    client: TestClient,
+) -> None:
+    """`[D35]`, F30: a nested message written out again whose multipart the parser could not
+    segment — here it declares no boundary — is written as stored, 8-bit bytes and all. Every
+    release until 0.7.0 answered 500: the generator was handed the part's text with U+FFFD for
+    each 8-bit byte and could not encode it. A boundary past 8,192 characters, which `[D34]`
+    leaves unread, reaches the same path, and did so first in this release.
+
+    The controls are the same message with an ASCII body, and with LF after each delimiter,
+    where nothing is written out again; both were answered by 0.6.0 too.
+    """
+    raw = (REGRESSIONS / "2026-10-06-an-unsegmented-multipart-with-8-bit-bytes.eml").read_bytes()
+    padded = raw.replace(
+        b"Content-Type: multipart/mixed\r\n",
+        b'Content-Type: multipart/mixed; boundary="IN"; x-pad=' + b"a" * 9_000 + b"\r\n",
+    )
+    eight_bit = "zażółć".encode()
+    assert raw.count(eight_bit) == 1 and padded != raw
+
+    def nested_eml(data: bytes) -> tuple[list[str], bytes]:
+        body = dissect(client, data)
+        eml = next(a for a in body["artifacts"] if a["kind"] == "eml" and a["message_index"] == 1)
+        return body["flags"], client.get(
+            f"/v1/artifact/{body['dissect_id']}/{eml['artifact_id']}"
+        ).content
+
+    for data, flags in ((raw, ["malformed_mime"]), (padded, ["truncated", "malformed_mime"])):
+        found, written = nested_eml(data)
+        assert found == flags
+        assert eight_bit in written and written.startswith(b"From: inner@example.net")
+
+    assert nested_eml(raw.replace(eight_bit, b"ascii"))[0] == ["malformed_mime"]
+    line_feeds = raw.replace(b"OUT\r", b"OUT\n").replace(b"\r--", b"\n--").replace(b"--\r", b"--\n")
+    assert b"\r" not in line_feeds.replace(b"\r\n", b"")
+    found, located = nested_eml(line_feeds)
+    assert found == ["malformed_mime"] and eight_bit in located and located in line_feeds
+
+
 def test_a_nested_message_behind_bare_cr_delimiters_is_written_as_stored(
     client: TestClient,
 ) -> None:

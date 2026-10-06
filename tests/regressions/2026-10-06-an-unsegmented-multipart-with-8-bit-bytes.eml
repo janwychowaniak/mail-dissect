@@ -1,0 +1,18 @@
+From: outer@example.net
+Subject: an unsegmented multipart with 8-bit bytes
+Content-Type: multipart/mixed; boundary="OUT"
+
+--OUTContent-Type: text/plain
+
+first--OUTContent-Type: message/rfc822
+
+From: inner@example.net
+Subject: inner
+Content-Type: multipart/mixed
+
+--IN
+Content-Type: text/plain; charset=utf-8
+
+zażółć
+--IN--
+--OUT--

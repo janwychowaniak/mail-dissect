@@ -2,8 +2,8 @@
 
 Run:  python3.13 docs/research/probes/email_stdlib.py
 
-Findings F1 to F10, F17 to F19, F21 and F23 to F27 in ../NOTES.md are produced by one function
-each here.
+Findings F1 to F10, F17 to F19, F21, F23 to F27 and F30 in ../NOTES.md are produced by one
+function each here.
 The probes are read-only, offline, and depend on nothing but the standard library, so
 anyone can re-run them against a newer interpreter and see whether a finding still
 holds. Print output is the evidence; keep it terse enough to paste.
@@ -703,6 +703,35 @@ def f27_the_parse_floor() -> None:
         print(f"  {label:40} " + "  ".join(cells))
 
 
+def f30_an_unsegmented_multipart_written_out_again() -> None:
+    """Can the generator write a multipart the parser could not segment, holding 8-bit bytes?"""
+    _banner("F30", "an unsegmented multipart with 8-bit bytes, written out again")
+
+    def write(raw: bytes) -> str:
+        message = message_from_bytes(raw, policy=email.policy.compat32)
+        buffer = BytesIO()
+        try:
+            BytesGenerator(buffer, policy=email.policy.SMTP).flatten(message)
+        except Exception as error:  # what is raised is the finding
+            return f"{type(error).__name__}"
+        return "written" + (", identical body" if buffer.getvalue().endswith(raw[-12:]) else "")
+
+    head = b"Subject: s\r\nContent-Type: multipart/mixed\r\n\r\n"
+    eight = head + "--IN\r\n\r\nza\u017c\u00f3\u0142\u0107\r\n--IN--\r\n".encode()
+    message = message_from_bytes(eight, policy=email.policy.compat32)
+    stored = message._payload  # what the parser stored, beside what it hands out
+    handed = message.get_payload()
+    print(f"  stored as text with surrogates: {any(0xDC80 <= ord(c) <= 0xDCFF for c in stored)}")
+    print(f"  get_payload() hands out U+FFFD: {'\ufffd' in handed}")
+    print(f"  a multipart with no boundary, 8-bit bytes:   {write(eight)}")
+    plain = head + b"--IN\r\n\r\nplain\r\n--IN--\r\n"
+    print(f"  the same with an ASCII body (control):       {write(plain)}")
+    leaf = b"Subject: s\r\nContent-Type: text/plain\r\n\r\n" + "za\u017c\u00f3\u0142\u0107".encode()
+    print(f"  a text/plain leaf with 8-bit bytes (control): {write(leaf)}")
+    back = stored.encode("ascii", "surrogateescape") == eight[len(head) :]
+    print(f"  the stored text, encoded back, is the body: {back}")
+
+
 def main() -> int:
     print(f"python {sys.version}")
     f1_nested_reserialisation_is_not_byte_identical()
@@ -724,6 +753,7 @@ def main() -> int:
     f25_part_parameters()
     f26_writing_a_message_out_again()
     f27_the_parse_floor()
+    f30_an_unsegmented_multipart_written_out_again()
     return 0
 
 

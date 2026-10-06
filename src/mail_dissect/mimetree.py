@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import email.errors
 from dataclasses import dataclass, field
+from email.generator import BytesGenerator
 from email.message import Message
 from email.parser import BytesParser
 from io import BytesIO
@@ -233,8 +234,25 @@ def _verifies(located: bytes, part: Message) -> bool:
     return True
 
 
+class _AsStored(BytesGenerator):
+    """The generator of the fallback below: a multipart the parser could not segment is
+    written as it is stored.
+
+    compat32 keeps the text of such a part with each 8-bit byte as a surrogate, and hands it
+    out decoded with U+FFFD in place of each, which the generator then cannot encode: one 8-bit
+    byte in it was a 500 in every release until 0.7.0 (F30). The stored text is the bytes,
+    as the generator itself writes a text part that holds 8-bit bytes.
+    """
+
+    def _handle_multipart(self, msg: Message) -> None:
+        stored = vars(msg).get("_payload")
+        if isinstance(stored, str):
+            self.write(stored)
+            return
+        super()._handle_multipart(msg)  # type: ignore[misc]
+
+
 def _reserialise(part: Message) -> bytes:
-    from email.generator import BytesGenerator
     from email.policy import SMTP
 
     children = part.get_payload()
@@ -248,10 +266,9 @@ def _reserialise(part: Message) -> bytes:
     # longer than 78 characters through the header registry, whose cost is its steps times
     # what is left to read (F24), and it rewrites what the message held: this fallback is
     # already marked `malformed_mime` for not being the original bytes, and should be as
-    # close to them as it can. typeshed types `flatten` for EmailMessage; compat32 hands us
-    # a Message, which is what the generator has always accepted.
+    # close to them as it can.
     policy = SMTP.clone(refold_source="none")
-    BytesGenerator(buffer, policy=policy).flatten(inner)  # type: ignore[arg-type]
+    _AsStored(buffer, policy=policy).flatten(inner)
     return buffer.getvalue()
 
 

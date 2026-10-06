@@ -1429,6 +1429,11 @@ Approved by the maintainer, 2026-09-17.
   registry, at the registry's cost, so a `Cc` of 16,000 periods inside such a message took five
   seconds, and it rewrote a long line that the message held whole. Written as stored, the bytes
   are the same for short lines and closer to the original for long ones, and cost nothing.
+  **Amended 2026-10-06, before 0.7.0 was released:** the body of a multipart that the parser
+  could not segment is written as stored too. The standard library hands that text out with
+  U+FFFD for each 8-bit byte and then cannot write it (F30), so one such byte inside a nested
+  message written out again was a 500 in every release; with `[D34]` a boundary past 8,192
+  characters reaches the same path. Found by the generated corpus of the 0.7.0 notes.
 - **[D36] At most 1,024 fields of a header block are read**, in the order written (§15).
   Decided 2026-10-05, for 0.7.0. Each field costs the parser and every list read out of headers
   something, and a sender sets their number: before 0.7.0, one value listed in 20,000 places

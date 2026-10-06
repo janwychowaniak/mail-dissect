@@ -380,7 +380,9 @@ def _task_responses(messages: list[list[str]]) -> dict[str, dict[str, Any]]:
                 Settings(_env_file=None, **overrides), transport=httpx.MockTransport(tools)
             )
             results: dict[str, Any] = {}
-            with TestClient(app) as client:
+            # A tree that fails on a message answers it with a 500, which is compared like any
+            # other answer rather than ending the run.
+            with TestClient(app, raise_server_exceptions=False) as client:
                 for name, encoded in messages:
                     response = client.post(
                         "/v1/dissect",

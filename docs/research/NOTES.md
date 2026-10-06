@@ -1120,3 +1120,24 @@ result depends on the order of the parts: with `img1` read before `img10`,
 `<img src="cid:img10">` became `<img src="a.png0">` — a substring of one reference taken for
 another. Only the screenshot was affected, an artifact that depends on a tool and so on the
 environment (§17).
+
+## F30 — a multipart the parser could not segment, written out again with 8-bit bytes in it
+
+Probed with `f30_an_unsegmented_multipart_written_out_again` in `probes/email_stdlib.py` on
+3.12.3, 3.13.12 and on 3.13.16 inside the 0.7.0 image, with the same result on each. A
+multipart that declares no boundary is not segmented, and under `compat32` the parser stores
+its text with each 8-bit byte as a surrogate. `get_payload()` hands that text out decoded in the
+part's charset, `ascii` when none is declared, with U+FFFD for each byte it cannot decode, and
+`BytesGenerator` writes what `get_payload()` returns: it encodes it as ASCII with
+`surrogateescape`, which takes a surrogate back to its byte and raises `UnicodeEncodeError` on
+U+FFFD. The same message with an ASCII body is written, and so is a `text/plain` part with the
+same 8-bit bytes, because the generator writes a text part's stored text when it holds
+surrogates; the stored text, encoded back, is the body as it was in the input.
+
+The service writes a nested message out again only when it cannot verify the message's span in
+the input, and marks it `malformed_mime` `[D35]`. Delimiters that end in a bare CR are one way
+there (F26), so a nested message behind them whose multipart had no boundary and one 8-bit
+byte was answered with a 500 by every published image from 0.1.0 to 0.6.0, measured on each of
+the seven, each of which answered the same message with LF delimiters. In 0.7.0
+`[D34]` leaves a boundary past 8,192 characters unread, which reaches the same path. Both shapes
+came out of the generated corpus measured for the 0.7.0 notes, before the release.
